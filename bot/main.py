@@ -11,6 +11,7 @@ from bot.database import SeenStorage
 from bot.fl_rss import fetch_fl_orders
 from bot.keywords import evaluate_filter
 from bot.kwork_html import fetch_kwork_orders
+from bot.kwork_imap import fetch_kwork_orders_from_imap
 from bot.models import OrderCard
 from bot.notifier import Notifier
 
@@ -20,6 +21,7 @@ logger = logging.getLogger("order_hunter")
 async def _collect_orders() -> list[OrderCard]:
     settings = get_settings()
     cards: list[OrderCard] = []
+    cards.extend(await fetch_kwork_orders_from_imap())
     if settings.ENABLE_FL:
         cards.extend(await fetch_fl_orders(settings.FL_RSS_URL))
     if settings.ENABLE_KWORK:
@@ -94,9 +96,10 @@ async def main() -> None:
     started_at = datetime.now(tz=UTC)
 
     logger.info(
-        "Order hunter started: interval=%ss dry_run=%s enable_fl=%s enable_kwork=%s",
+        "Order hunter started: interval=%ss dry_run=%s enable_kwork_imap=%s enable_fl=%s enable_kwork=%s",
         settings.POLL_INTERVAL_SECONDS,
         settings.dry_run,
+        settings.ENABLE_KWORK_IMAP,
         settings.ENABLE_FL,
         settings.ENABLE_KWORK,
     )

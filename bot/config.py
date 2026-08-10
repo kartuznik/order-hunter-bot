@@ -22,6 +22,15 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = Field(default="PLACEHOLDER_TOKEN")
     NOTIFY_CHAT_IDS: str = Field(default="")
 
+    ENABLE_KWORK_IMAP: bool = Field(default=True)
+    IMAP_HOST: str = Field(default="")
+    IMAP_PORT: int = Field(default=993)
+    IMAP_USERNAME: str = Field(default="")
+    IMAP_APP_PASSWORD: str = Field(default="")
+    IMAP_FOLDER: str = Field(default="INBOX")
+    KWORK_EMAIL_FROM: str = Field(default="mail@kwork.ru")
+    KWORK_EMAIL_SUBJECT_HINT: str = Field(default="")
+
     ENABLE_FL: bool = Field(default=True)
     FL_RSS_URL: str = Field(default="https://www.fl.ru/rss/all.xml")
     ENABLE_KWORK: bool = Field(default=False)
@@ -72,6 +81,14 @@ class Settings(BaseSettings):
     def dry_run(self) -> bool:
         token = self.TELEGRAM_BOT_TOKEN.strip()
         return not token or token.upper().startswith("PLACEHOLDER")
+
+    @property
+    def imap_ready(self) -> bool:
+        return (
+            bool(self.IMAP_HOST.strip())
+            and bool(self.IMAP_USERNAME.strip())
+            and bool(self.IMAP_APP_PASSWORD.strip())
+        )
 
 
 @lru_cache(maxsize=1)
