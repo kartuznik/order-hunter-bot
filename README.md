@@ -45,6 +45,8 @@ systemctl status order-hunter-bot
 
 ```bash
 venv/bin/python scripts/live_check.py
+venv/bin/python scripts/live_check_fl.py
+venv/bin/python scripts/live_check_kwork.py
 ```
 
 ## Telegram команда
