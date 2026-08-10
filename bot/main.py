@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from bot.config import get_settings
 from bot.database import SeenStorage
 from bot.fl_rss import fetch_fl_orders
-from bot.keywords import passes_keyword_filter
+from bot.keywords import evaluate_filter
 from bot.kwork_html import fetch_kwork_orders
 from bot.models import OrderCard
 from bot.notifier import Notifier
@@ -29,17 +29,29 @@ async def _collect_orders() -> list[OrderCard]:
 
 async def _process_poll(storage: SeenStorage, notifier: Notifier) -> dict[str, int]:
     settings = get_settings()
-    seen_count = 0
-    filtered_count = 0
-    notified_count = 0
+    seen_total = 0
+    passed_filter = 0
+    blocked_by_negative = 0
+    rejected_by_and_logic = 0
+    sent_notifications = 0
 
     cards = await _collect_orders()
     for card in cards:
-        seen_count += 1
+        seen_total += 1
         full_text = f"{card.title}\n{card.description}"
-        if not passes_keyword_filter(full_text, settings.keywords):
+        passed, blocked_negative, _ = evaluate_filter(
+            text=full_text,
+            positive_keywords=settings.keywords,
+            negative_keywords=settings.negative_keywords,
+            min_positive_matches=settings.MIN_POSITIVE_MATCHES,
+        )
+        if blocked_negative:
+            blocked_by_negative += 1
             continue
-        filtered_count += 1
+        if not passed:
+            rejected_by_and_logic += 1
+            continue
+        passed_filter += 1
         if storage.is_seen(card.source, card.external_id):
             continue
         inserted = storage.mark_seen(
@@ -53,10 +65,22 @@ async def _process_poll(storage: SeenStorage, notifier: Notifier) -> dict[str, i
             continue
         sent = await notifier.send_order(card)
         if sent:
-            notified_count += 1
+            sent_notifications += 1
 
-    storage.bump_stats(seen=seen_count, filtered=filtered_count, notified=notified_count)
-    return {"seen": seen_count, "filtered": filtered_count, "notified": notified_count}
+    storage.bump_stats(
+        seen=seen_total,
+        filtered=passed_filter,
+        blocked_negative=blocked_by_negative,
+        rejected_and=rejected_by_and_logic,
+        notified=sent_notifications,
+    )
+    return {
+        "seen_total": seen_total,
+        "passed_filter": passed_filter,
+        "blocked_by_negative": blocked_by_negative,
+        "rejected_by_and_logic": rejected_by_and_logic,
+        "sent_notifications": sent_notifications,
+    }
 
 
 async def main() -> None:
@@ -91,13 +115,18 @@ async def main() -> None:
                 total = storage.read_stats()
                 runtime_minutes = int((datetime.now(tz=UTC) - started_at).total_seconds() // 60)
                 logger.info(
-                    "Poll complete: seen=%s filtered=%s notified=%s total_seen=%s total_filtered=%s "
-                    "total_notified=%s runtime_minutes=%s",
-                    metrics["seen"],
-                    metrics["filtered"],
-                    metrics["notified"],
+                    "Poll complete: seen_total=%s passed_filter=%s blocked_by_negative=%s "
+                    "rejected_by_and_logic=%s sent_notifications=%s totals_seen=%s totals_passed=%s "
+                    "totals_blocked=%s totals_rejected_and=%s totals_notified=%s runtime_minutes=%s",
+                    metrics["seen_total"],
+                    metrics["passed_filter"],
+                    metrics["blocked_by_negative"],
+                    metrics["rejected_by_and_logic"],
+                    metrics["sent_notifications"],
                     total["total_seen"],
                     total["total_filtered"],
+                    total["total_blocked_negative"],
+                    total["total_rejected_and"],
                     total["total_notified"],
                     runtime_minutes,
                 )

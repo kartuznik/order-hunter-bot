@@ -21,7 +21,7 @@ async def run() -> None:
     metrics = await _process_poll(storage=storage, notifier=notifier)
     print(
         f"SMOKE_OK order_hunter /start dry_run={notifier.dry_run} "
-        f"seen={metrics['seen']} filtered={metrics['filtered']}"
+        f"seen_total={metrics['seen_total']} passed_filter={metrics['passed_filter']}"
     )
     await notifier.close()
 

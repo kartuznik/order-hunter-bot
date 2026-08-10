@@ -9,6 +9,11 @@ DEFAULT_KEYWORDS = (
     "telegram,телеграм,tg,bot,бот,python,ai,ии,нейросеть,gpt,автоматизация,"
     "парсер,скрипт,магазин,оплата,корзина,анкета,заявка,опрос"
 )
+DEFAULT_NEGATIVE_KEYWORDS = (
+    "дизайн,логотип,баннер,иллюстрац,презентац,3d,3д,архитектур,инженер,смет,чертеж,"
+    "овик,вк,вышивк,перевод,копирайт,рерайт,smm,таргет,seo,контекст,авито,фотограф,"
+    "музык,диктор,тендер,android,андроид,ios,мобильн,сайт,лендинг"
+)
 
 
 class Settings(BaseSettings):
@@ -23,6 +28,8 @@ class Settings(BaseSettings):
     KWORK_PROJECTS_URL: str = Field(default="https://kwork.ru/projects")
 
     KEYWORDS: str = Field(default=DEFAULT_KEYWORDS)
+    NEGATIVE_KEYWORDS: str = Field(default=DEFAULT_NEGATIVE_KEYWORDS)
+    MIN_POSITIVE_MATCHES: int = Field(default=2)
     POLL_INTERVAL_SECONDS: int = Field(default=180)
     DB_PATH: str = Field(default="data/order_hunter.db")
 
@@ -38,10 +45,20 @@ class Settings(BaseSettings):
         raw = self.KEYWORDS.strip() or DEFAULT_KEYWORDS
         return [part.strip().lower() for part in raw.split(",") if part.strip()]
 
+    @property
+    def negative_keywords(self) -> list[str]:
+        raw = self.NEGATIVE_KEYWORDS.strip() or DEFAULT_NEGATIVE_KEYWORDS
+        return [part.strip().lower() for part in raw.split(",") if part.strip()]
+
     @field_validator("POLL_INTERVAL_SECONDS")
     @classmethod
     def clamp_poll_interval(cls, value: int) -> int:
         return max(180, int(value))
+
+    @field_validator("MIN_POSITIVE_MATCHES")
+    @classmethod
+    def clamp_min_positive_matches(cls, value: int) -> int:
+        return max(1, int(value))
 
     @property
     def db_file(self) -> Path:

@@ -42,8 +42,23 @@ class SeenStorage:
                     total_notified INTEGER NOT NULL DEFAULT 0,
                     updated_at TEXT NOT NULL
                 );
+                """
+            )
+            columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(poll_stats)").fetchall()
+            }
+            if "total_blocked_negative" not in columns:
+                conn.execute(
+                    "ALTER TABLE poll_stats ADD COLUMN total_blocked_negative INTEGER NOT NULL DEFAULT 0"
+                )
+            if "total_rejected_and" not in columns:
+                conn.execute(
+                    "ALTER TABLE poll_stats ADD COLUMN total_rejected_and INTEGER NOT NULL DEFAULT 0"
+                )
+            conn.execute(
+                """
                 INSERT OR IGNORE INTO poll_stats (id, total_seen, total_filtered, total_notified, updated_at)
-                VALUES (1, 0, 0, 0, CURRENT_TIMESTAMP);
+                VALUES (1, 0, 0, 0, CURRENT_TIMESTAMP)
                 """
             )
             conn.commit()
@@ -86,13 +101,23 @@ class SeenStorage:
             except sqlite3.IntegrityError:
                 return False
 
-    def bump_stats(self, *, seen: int, filtered: int, notified: int) -> None:
+    def bump_stats(
+        self,
+        *,
+        seen: int,
+        filtered: int,
+        blocked_negative: int,
+        rejected_and: int,
+        notified: int,
+    ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE poll_stats
                 SET total_seen = total_seen + ?,
                     total_filtered = total_filtered + ?,
+                    total_blocked_negative = total_blocked_negative + ?,
+                    total_rejected_and = total_rejected_and + ?,
                     total_notified = total_notified + ?,
                     updated_at = ?
                 WHERE id = 1
@@ -100,6 +125,8 @@ class SeenStorage:
                 (
                     int(seen),
                     int(filtered),
+                    int(blocked_negative),
+                    int(rejected_and),
                     int(notified),
                     datetime.now(tz=UTC).isoformat(),
                 ),
@@ -109,12 +136,24 @@ class SeenStorage:
     def read_stats(self) -> dict[str, int]:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT total_seen, total_filtered, total_notified FROM poll_stats WHERE id = 1"
+                """
+                SELECT total_seen, total_filtered, total_blocked_negative, total_rejected_and, total_notified
+                FROM poll_stats
+                WHERE id = 1
+                """
             ).fetchone()
         if row is None:
-            return {"total_seen": 0, "total_filtered": 0, "total_notified": 0}
+            return {
+                "total_seen": 0,
+                "total_filtered": 0,
+                "total_blocked_negative": 0,
+                "total_rejected_and": 0,
+                "total_notified": 0,
+            }
         return {
             "total_seen": int(row["total_seen"]),
             "total_filtered": int(row["total_filtered"]),
+            "total_blocked_negative": int(row["total_blocked_negative"]),
+            "total_rejected_and": int(row["total_rejected_and"]),
             "total_notified": int(row["total_notified"]),
         }
