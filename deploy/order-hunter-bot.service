@@ -1,0 +1,15 @@
+[Unit]
+Description=Order Hunter Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/bots/order-hunter-bot
+Environment="PATH=/opt/bots/order-hunter-bot/venv/bin"
+ExecStart=/opt/bots/order-hunter-bot/venv/bin/python -m bot.main
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
