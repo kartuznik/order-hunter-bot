@@ -47,6 +47,11 @@ systemctl status order-hunter-bot
 venv/bin/python scripts/live_check.py
 ```
 
+## Telegram команда
+
+- `/stats` — отдает текущие счетчики цикла.
+- Доступ ограничен chat-id из `NOTIFY_CHAT_IDS`.
+
 ## Ограничения и вежливость к площадкам
 
 - Интервал опроса не короче 180 секунд.

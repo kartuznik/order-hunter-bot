@@ -14,6 +14,7 @@ from bot.kwork_html import fetch_kwork_orders
 from bot.kwork_imap import fetch_kwork_orders_from_imap
 from bot.models import OrderCard
 from bot.notifier import Notifier
+from bot.stats_listener import run_stats_listener
 
 logger = logging.getLogger("order_hunter")
 
@@ -106,6 +107,9 @@ async def main() -> None:
     await notifier.send_startup_test()
 
     stop_event = asyncio.Event()
+    stats_task = asyncio.create_task(
+        run_stats_listener(settings=settings, storage=storage, stop_event=stop_event)
+    )
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError):
@@ -141,6 +145,10 @@ async def main() -> None:
             except asyncio.TimeoutError:
                 continue
     finally:
+        stop_event.set()
+        stats_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await stats_task
         await notifier.close()
 
 
