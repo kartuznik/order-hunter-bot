@@ -36,6 +36,12 @@ systemctl start order-hunter-bot
 systemctl status order-hunter-bot
 ```
 
+## Live-check уведомлений
+
+```bash
+venv/bin/python scripts/live_check.py
+```
+
 ## Ограничения и вежливость к площадкам
 
 - Интервал опроса не короче 180 секунд.
