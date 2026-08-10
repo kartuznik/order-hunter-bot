@@ -43,9 +43,9 @@ async def _process_poll(storage: SeenStorage, notifier: Notifier) -> dict[str, i
         full_text = f"{card.title}\n{card.description}"
         passed, blocked_negative, _ = evaluate_filter(
             text=full_text,
-            positive_keywords=settings.keywords,
+            core_keywords=settings.core_keywords,
+            secondary_keywords=settings.secondary_keywords,
             negative_keywords=settings.negative_keywords,
-            min_positive_matches=settings.MIN_POSITIVE_MATCHES,
         )
         if blocked_negative:
             blocked_by_negative += 1

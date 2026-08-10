@@ -5,9 +5,9 @@ from pathlib import Path
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-DEFAULT_KEYWORDS = (
-    "telegram,телеграм,tg,bot,бот,python,ai,ии,нейросеть,gpt,автоматизация,"
-    "парсер,скрипт,магазин,оплата,корзина,анкета,заявка,опрос"
+DEFAULT_CORE_KEYWORDS = "bot,бот,telegram,телеграм,tg"
+DEFAULT_SECONDARY_KEYWORDS = (
+    "python,ai,ии,gpt,автоматизация,парсер,скрипт,магазин,оплата,корзина,анкета,заявка,опрос,рассылка"
 )
 DEFAULT_NEGATIVE_KEYWORDS = (
     "дизайн,логотип,баннер,иллюстрац,презентац,3d,3д,архитектур,инженер,смет,чертеж,"
@@ -36,9 +36,9 @@ class Settings(BaseSettings):
     ENABLE_KWORK: bool = Field(default=False)
     KWORK_PROJECTS_URL: str = Field(default="https://kwork.ru/projects")
 
-    KEYWORDS: str = Field(default=DEFAULT_KEYWORDS)
+    CORE_KEYWORDS: str = Field(default=DEFAULT_CORE_KEYWORDS)
+    SECONDARY_KEYWORDS: str = Field(default=DEFAULT_SECONDARY_KEYWORDS)
     NEGATIVE_KEYWORDS: str = Field(default=DEFAULT_NEGATIVE_KEYWORDS)
-    MIN_POSITIVE_MATCHES: int = Field(default=2)
     POLL_INTERVAL_SECONDS: int = Field(default=180)
     DB_PATH: str = Field(default="data/order_hunter.db")
 
@@ -50,8 +50,13 @@ class Settings(BaseSettings):
         return [int(v.strip()) for v in raw.split(",") if v.strip()]
 
     @property
-    def keywords(self) -> list[str]:
-        raw = self.KEYWORDS.strip() or DEFAULT_KEYWORDS
+    def core_keywords(self) -> list[str]:
+        raw = self.CORE_KEYWORDS.strip() or DEFAULT_CORE_KEYWORDS
+        return [part.strip().lower() for part in raw.split(",") if part.strip()]
+
+    @property
+    def secondary_keywords(self) -> list[str]:
+        raw = self.SECONDARY_KEYWORDS.strip() or DEFAULT_SECONDARY_KEYWORDS
         return [part.strip().lower() for part in raw.split(",") if part.strip()]
 
     @property
@@ -63,11 +68,6 @@ class Settings(BaseSettings):
     @classmethod
     def clamp_poll_interval(cls, value: int) -> int:
         return max(180, int(value))
-
-    @field_validator("MIN_POSITIVE_MATCHES")
-    @classmethod
-    def clamp_min_positive_matches(cls, value: int) -> int:
-        return max(1, int(value))
 
     @property
     def db_file(self) -> Path:

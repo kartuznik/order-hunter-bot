@@ -8,13 +8,14 @@ def _match_count(text: str, keywords: list[str]) -> int:
 
 def evaluate_filter(
     text: str,
-    positive_keywords: list[str],
+    core_keywords: list[str],
+    secondary_keywords: list[str],
     negative_keywords: list[str],
-    min_positive_matches: int,
-) -> tuple[bool, bool, int]:
+    ) -> tuple[bool, bool, tuple[int, int]]:
     haystack = text.lower()
     if any(keyword in haystack for keyword in negative_keywords):
-        return False, True, 0
-    matches = _match_count(haystack, positive_keywords)
-    passed = matches >= min_positive_matches
-    return passed, False, matches
+        return False, True, (0, 0)
+    core_matches = _match_count(haystack, core_keywords)
+    secondary_matches = _match_count(haystack, secondary_keywords)
+    passed = core_matches >= 1 and secondary_matches >= 1
+    return passed, False, (core_matches, secondary_matches)
