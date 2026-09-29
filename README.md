@@ -19,6 +19,30 @@
 - Приоритетный канал Kwork: IMAP-письма из уведомлений Kwork (`ENABLE_KWORK_IMAP`).
 - HTML-парсер Kwork остаётся резервным и выключен по умолчанию (`ENABLE_KWORK=false`).
 - Страница проектов Kwork JS-driven, структура HTML может меняться; стабильный парсинг не гарантирован.
+- Ссылка и в HTML-заглушке, и в карточке мобильного API собирается одним шаблоном: `https://kwork.ru/projects/{id}`.
+
+## Kwork mobile API
+
+Неофициальное мобильное JSON API `https://api.kwork.ru`. Kwork может изменить или отключить его без предупреждения.
+
+Контракт снят с открытых репозиториев [sabraman/kwork-parser](https://github.com/sabraman/kwork-parser) и [kesha1225/pykwork](https://github.com/kesha1225/pykwork). Живой веб Kwork для этого не использовался.
+
+Решения:
+
+- Свой тонкий клиент на уже стоящем `aiohttp`. Пакет pykwork не подключаем.
+- Поллинг внутри текущего процесса order-hunter, со своим таймером. База 5 минут плюс случайные 30–90 секунд. Это единственная страховка от бана: прокси и запасные аккаунты не используются.
+- Источник `kwork_api`, бейдж `KWORK_API`. Склейка с каналом IMAP на полке: один и тот же проект может прийти и из почты, и из API.
+- В проде читается только первая страница. Если между тиками проектов больше, чем влезает на неё, хвост в уведомления не попадёт.
+- `/wantsStatusList` не используется: в OpenAPI это вкладки статусов покупателя, не лента биржи.
+
+| Факт | Значение | Откуда |
+|---|---|---|
+| Auth | HTTP Basic мобильного клиента + `token` в query после `POST /signIn` | sabraman `src/kwork/api.rs`, OpenAPI pykwork |
+| Цель | `POST /projects`, первая страница | OpenAPI pykwork, `get_projects` |
+| Ссылка карточки | `https://kwork.ru/projects/{id}` | `bot/kwork_html.py`, тот же шаблон у API-карточки |
+| User-Agent, принятый `signIn` | не снят | зонд не выполнен: `KWORK_PASSWORD` в `.env` пустой |
+| Единицы `date_confirm` | не сняты | тот же зонд |
+| Единицы `time_left` | не сняты | тот же зонд |
 
 ## Запуск
 
@@ -39,6 +63,16 @@ systemctl daemon-reload
 systemctl enable order-hunter-bot
 systemctl start order-hunter-bot
 systemctl status order-hunter-bot
+```
+
+После merge этой ветки юнит не меняется, `daemon-reload` не нужен. На сервере:
+
+```bash
+cd /opt/bots/order-hunter-bot
+git pull
+systemctl restart order-hunter-bot.service
+systemctl status order-hunter-bot.service
+journalctl -u order-hunter-bot -n 50
 ```
 
 ## Live-check уведомлений
