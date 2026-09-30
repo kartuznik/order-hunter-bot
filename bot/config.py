@@ -217,6 +217,7 @@ class Settings(BaseSettings):
     NEGATIVE_KEYWORDS: str = Field(default=DEFAULT_NEGATIVE_KEYWORDS)
     POLL_INTERVAL_SECONDS: int = Field(default=180)
     DB_PATH: str = Field(default="data/order_hunter.db")
+    DEBUG_FILTER_LOGS: bool = Field(default=False)
 
     @property
     def notify_chat_ids(self) -> list[int]:

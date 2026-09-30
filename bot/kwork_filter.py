@@ -30,6 +30,36 @@ REASON_TITLE = "blocked_by_title_repeat"
 REASON_ACCEPT = "accept"
 REASON_GRAY = "gray"
 
+_TOKEN_RE = re.compile(r"(?<!\w)[\w]+(?!\w)")
+_RU_ENDINGS = (
+    "иями",
+    "ями",
+    "ами",
+    "ого",
+    "ему",
+    "ыми",
+    "ими",
+    "ией",
+    "иях",
+    "ах",
+    "ях",
+    "ов",
+    "ев",
+    "ей",
+    "ой",
+    "ый",
+    "ий",
+    "ые",
+    "ие",
+    "а",
+    "я",
+    "ы",
+    "и",
+    "е",
+    "у",
+    "ю",
+    "о",
+)
 _DAY = r"д(?:ень|ня|ней)"
 _DEADLINE_RES = (
     re.compile(rf"\bза\s+(\d+)\s+{_DAY}\b"),
@@ -47,6 +77,7 @@ class FilterDecision:
     accept: bool
     reason: str
     gray: bool = False
+    score: int = 0
 
 
 def title_hash(title: str) -> str:
@@ -66,17 +97,18 @@ def parse_budget_rub(price: str) -> int | None:
 
 def decide_card(card: OrderCard, *, title_repeat: bool) -> FilterDecision:
     text = _normalize(f"{card.title}\n{card.description}")
+    score = calculate_green_score(card.title, card.description)
     if _is_red(text):
-        return FilterDecision(False, REASON_RED)
-    if calculate_green_score(card.title, card.description) < GREEN_SCORE_THRESHOLD:
-        return FilterDecision(False, REASON_LOW_SCORE)
+        return FilterDecision(False, REASON_RED, score=score)
+    if score < GREEN_SCORE_THRESHOLD:
+        return FilterDecision(False, REASON_LOW_SCORE, score=score)
 
     budget = parse_budget_rub(card.price)
     if budget is not None and budget < BUDGET_DROP_RUB:
-        return FilterDecision(False, REASON_BUDGET)
+        return FilterDecision(False, REASON_BUDGET, score=score)
     deadline_days = _deadline_days(text)
     if deadline_days is not None and deadline_days < DEADLINE_DROP_DAYS:
-        return FilterDecision(False, REASON_DEADLINE)
+        return FilterDecision(False, REASON_DEADLINE, score=score)
     modules = _module_count(text)
     if (
         modules is not None
@@ -84,21 +116,44 @@ def decide_card(card: OrderCard, *, title_repeat: bool) -> FilterDecision:
         and budget is not None
         and budget < MODULE_DROP_BUDGET_RUB
     ):
-        return FilterDecision(False, REASON_MODULES)
+        return FilterDecision(False, REASON_MODULES, score=score)
     if title_repeat:
-        return FilterDecision(False, REASON_TITLE)
+        return FilterDecision(False, REASON_TITLE, score=score)
     if _is_gray(text, budget=budget, modules=modules):
-        return FilterDecision(True, REASON_GRAY, gray=True)
-    return FilterDecision(True, REASON_ACCEPT)
+        return FilterDecision(True, REASON_GRAY, gray=True, score=score)
+    return FilterDecision(True, REASON_ACCEPT, score=score)
 
 
 def calculate_green_score(title: str, description: str) -> int:
     text = _normalize(f"{title}\n{description}")
-    return sum(weight for term, weight in GREEN_WEIGHTS.items() if _has(text, term))
+    stems = [_stem_token(token) for token in _TOKEN_RE.findall(text)]
+    return sum(weight for term, weight in GREEN_WEIGHTS.items() if _weight_term_matches(text, stems, term))
 
 
 def _normalize(value: str) -> str:
     return value.lower().replace("ё", "е")
+
+
+def _stem_token(token: str) -> str:
+    if not _has_cyrillic(token):
+        return token
+    for ending in _RU_ENDINGS:
+        if len(token) > len(ending) + 2 and token.endswith(ending):
+            return token[: -len(ending)]
+    return token
+
+
+def _has_cyrillic(value: str) -> bool:
+    return any("а" <= ch <= "я" for ch in value)
+
+
+def _weight_term_matches(text: str, stems: list[str], term: str) -> bool:
+    parts = [part for part in re.split(r"[^\w]+", _normalize(term).strip()) if part]
+    if not parts or any(not _has_cyrillic(part) for part in parts):
+        return _has(text, term)
+    wanted = [_stem_token(part) for part in parts]
+    width = len(wanted)
+    return any(stems[index : index + width] == wanted for index in range(len(stems) - width + 1))
 
 
 def _is_red(text: str) -> bool:
