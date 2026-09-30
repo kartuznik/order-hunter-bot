@@ -30,6 +30,36 @@ REASON_TITLE = "blocked_by_title_repeat"
 REASON_ACCEPT = "accept"
 REASON_GRAY = "gray"
 
+_TOKEN_RE = re.compile(r"(?<!\w)[\w]+(?!\w)")
+_RU_ENDINGS = (
+    "иями",
+    "ями",
+    "ами",
+    "ого",
+    "ему",
+    "ыми",
+    "ими",
+    "ией",
+    "иях",
+    "ах",
+    "ях",
+    "ов",
+    "ев",
+    "ей",
+    "ой",
+    "ый",
+    "ий",
+    "ые",
+    "ие",
+    "а",
+    "я",
+    "ы",
+    "и",
+    "е",
+    "у",
+    "ю",
+    "о",
+)
 _DAY = r"д(?:ень|ня|ней)"
 _DEADLINE_RES = (
     re.compile(rf"\bза\s+(\d+)\s+{_DAY}\b"),
@@ -94,11 +124,34 @@ def decide_card(card: OrderCard, *, title_repeat: bool) -> FilterDecision:
 
 def calculate_green_score(title: str, description: str) -> int:
     text = _normalize(f"{title}\n{description}")
-    return sum(weight for term, weight in GREEN_WEIGHTS.items() if _has(text, term))
+    stems = [_stem_token(token) for token in _TOKEN_RE.findall(text)]
+    return sum(weight for term, weight in GREEN_WEIGHTS.items() if _weight_term_matches(text, stems, term))
 
 
 def _normalize(value: str) -> str:
     return value.lower().replace("ё", "е")
+
+
+def _stem_token(token: str) -> str:
+    if not _has_cyrillic(token):
+        return token
+    for ending in _RU_ENDINGS:
+        if len(token) > len(ending) + 2 and token.endswith(ending):
+            return token[: -len(ending)]
+    return token
+
+
+def _has_cyrillic(value: str) -> bool:
+    return any("а" <= ch <= "я" for ch in value)
+
+
+def _weight_term_matches(text: str, stems: list[str], term: str) -> bool:
+    parts = [part for part in re.split(r"[^\w]+", _normalize(term).strip()) if part]
+    if not parts or any(not _has_cyrillic(part) for part in parts):
+        return _has(text, term)
+    wanted = [_stem_token(part) for part in parts]
+    width = len(wanted)
+    return any(stems[index : index + width] == wanted for index in range(len(stems) - width + 1))
 
 
 def _is_red(text: str) -> bool:

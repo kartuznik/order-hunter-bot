@@ -58,6 +58,34 @@ def test_green_scores() -> None:
     assert calculate_green_score("github actions deploy", "") == 2
 
 
+def test_cyrillic_inflections_keep_dictionary_weight() -> None:
+    assert calculate_green_score("Юкассы", "") == calculate_green_score("юкасса", "") == 1
+    assert calculate_green_score("юкассы", "") == 1
+    assert calculate_green_score("Юкассе", "") == 1
+    assert calculate_green_score("интеграции", "") == calculate_green_score("интеграция", "") == 1
+    assert calculate_green_score("интеграцию", "") == 1
+    assert calculate_green_score("парсеров", "") == calculate_green_score("парсер", "") == 2
+    assert calculate_green_score("парсинга", "") == calculate_green_score("парсинг", "") == 2
+    assert calculate_green_score("бота", "") == calculate_green_score("бот", "") == 2
+    assert calculate_green_score("сервера", "") == calculate_green_score("сервер", "") == 1
+
+
+def test_stemmer_does_not_match_latin_substrings() -> None:
+    assert calculate_green_score("email", "") == 0
+    assert calculate_green_score("robot", "") == 0
+    assert calculate_green_score("makeup", "") == 0
+    assert calculate_green_score("fastapi", "") == 3
+    assert calculate_green_score("chatgpt", "") == 2
+    expect(card("Рассылка email"), REASON_LOW_SCORE)
+    expect(card("Makeup для визитки"), REASON_LOW_SCORE)
+
+
+def test_owner_inflected_title_reaches_threshold() -> None:
+    title = "Настройка API интеграции и экваринга Юкассы"
+    assert calculate_green_score(title, "") == 3
+    expect(card(title), REASON_ACCEPT)
+
+
 def test_low_score_is_rejected() -> None:
     expect(card("просто телеграм"), REASON_LOW_SCORE)
     expect(card("api интеграция"), REASON_LOW_SCORE)
