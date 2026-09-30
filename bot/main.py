@@ -10,6 +10,7 @@ from bot.config import get_settings
 from bot.database import SeenStorage
 from bot.fl_rss import fetch_fl_orders
 from bot.keywords import evaluate_filter
+from bot.kwork_api import run_kwork_loop
 from bot.kwork_html import fetch_kwork_orders
 from bot.kwork_imap import fetch_kwork_orders_from_imap
 from bot.models import OrderCard
@@ -30,7 +31,11 @@ async def _collect_orders() -> list[OrderCard]:
     return cards
 
 
-async def _process_poll(storage: SeenStorage, notifier: Notifier) -> dict[str, int]:
+async def _accept_cards(
+    storage: SeenStorage,
+    notifier: Notifier,
+    cards: list[OrderCard],
+) -> dict[str, int]:
     settings = get_settings()
     seen_total = 0
     passed_filter = 0
@@ -38,7 +43,6 @@ async def _process_poll(storage: SeenStorage, notifier: Notifier) -> dict[str, i
     rejected_by_and_logic = 0
     sent_notifications = 0
 
-    cards = await _collect_orders()
     for card in cards:
         seen_total += 1
         full_text = f"{card.title}\n{card.description}"
@@ -86,6 +90,11 @@ async def _process_poll(storage: SeenStorage, notifier: Notifier) -> dict[str, i
     }
 
 
+async def _process_poll(storage: SeenStorage, notifier: Notifier) -> dict[str, int]:
+    cards = await _collect_orders()
+    return await _accept_cards(storage, notifier, cards)
+
+
 async def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -97,18 +106,31 @@ async def main() -> None:
     started_at = datetime.now(tz=UTC)
 
     logger.info(
-        "Order hunter started: interval=%ss dry_run=%s enable_kwork_imap=%s enable_fl=%s enable_kwork=%s",
+        "Order hunter started: interval=%ss dry_run=%s enable_kwork_imap=%s enable_fl=%s enable_kwork=%s kwork_token=%s",
         settings.POLL_INTERVAL_SECONDS,
         settings.dry_run,
         settings.ENABLE_KWORK_IMAP,
         settings.ENABLE_FL,
         settings.ENABLE_KWORK,
+        bool(settings.kwork_token),
     )
     await notifier.send_startup_test()
 
     stop_event = asyncio.Event()
     stats_task = asyncio.create_task(
         run_stats_listener(settings=settings, storage=storage, stop_event=stop_event)
+    )
+
+    async def _accept_kwork(cards: list[OrderCard]) -> None:
+        await _accept_cards(storage, notifier, cards)
+
+    kwork_task = asyncio.create_task(
+        run_kwork_loop(
+            storage=storage,
+            notifier=notifier,
+            stop_event=stop_event,
+            accept_cards=_accept_kwork,
+        )
     )
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -147,8 +169,11 @@ async def main() -> None:
     finally:
         stop_event.set()
         stats_task.cancel()
+        kwork_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await stats_task
+        with contextlib.suppress(asyncio.CancelledError):
+            await kwork_task
         await notifier.close()
 
 
