@@ -65,6 +65,8 @@ def cards_from_payload(payload: dict[str, Any]) -> list[OrderCard]:
         if not isinstance(project_id, int) or isinstance(project_id, bool):
             continue
         price = item.get("price")
+        user_raw = item.get("user_id")
+        user_id = user_raw if isinstance(user_raw, int) and not isinstance(user_raw, bool) else None
         cards.append(
             OrderCard(
                 source="kwork_api",
@@ -73,6 +75,7 @@ def cards_from_payload(payload: dict[str, Any]) -> list[OrderCard]:
                 link=project_link(project_id),
                 description=str(item.get("description") or ""),
                 price=str(price) if isinstance(price, int) and not isinstance(price, bool) else "-",
+                user_id=user_id,
             )
         )
     return cards

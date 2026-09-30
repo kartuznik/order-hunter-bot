@@ -4,12 +4,13 @@ import asyncio
 import contextlib
 import logging
 import signal
+from dataclasses import replace
 from datetime import UTC, datetime
 
-from bot.config import get_settings
+from bot.config import TITLE_REPEAT_DAYS, get_settings
 from bot.database import SeenStorage
-from bot.keywords import evaluate_filter
 from bot.kwork_api import run_kwork_loop
+from bot.kwork_filter import GRAY_TITLE_PREFIX, decide_card, title_hash
 from bot.kwork_html import fetch_kwork_orders
 from bot.kwork_imap import fetch_kwork_orders_from_imap
 from bot.models import OrderCard
@@ -33,7 +34,6 @@ async def _accept_cards(
     notifier: Notifier,
     cards: list[OrderCard],
 ) -> dict[str, int]:
-    settings = get_settings()
     seen_total = 0
     passed_filter = 0
     blocked_by_negative = 0
@@ -42,32 +42,34 @@ async def _accept_cards(
 
     for card in cards:
         seen_total += 1
-        full_text = f"{card.title}\n{card.description}"
-        passed, blocked_negative, _ = evaluate_filter(
-            text=full_text,
-            core_keywords=settings.core_keywords,
-            secondary_keywords=settings.secondary_keywords,
-            negative_keywords=settings.negative_keywords,
+        decision = decide_card(
+            card,
+            title_repeat=storage.title_seen_within(title_hash(card.title), TITLE_REPEAT_DAYS),
         )
-        if blocked_negative:
-            blocked_by_negative += 1
-            continue
-        if not passed:
-            rejected_by_and_logic += 1
+        if not decision.accept:
+            logger.info("Kwork filter id=%s reason=%s", card.external_id, decision.reason)
+            if decision.reason == "blocked_by_red_list":
+                blocked_by_negative += 1
+            else:
+                rejected_by_and_logic += 1
             continue
         passed_filter += 1
         if storage.is_seen(card.source, card.external_id):
             continue
+        outgoing = card
+        if decision.gray:
+            outgoing = replace(card, title=f"{GRAY_TITLE_PREFIX}{card.title}")
         inserted = storage.mark_seen(
-            source=card.source,
-            external_id=card.external_id,
-            title=card.title,
-            link=card.link,
-            price=card.price,
+            source=outgoing.source,
+            external_id=outgoing.external_id,
+            title=outgoing.title,
+            link=outgoing.link,
+            price=outgoing.price,
         )
         if not inserted:
             continue
-        sent = await notifier.send_order(card)
+        storage.remember_title(title_hash(card.title))
+        sent = await notifier.send_order(outgoing)
         if sent:
             sent_notifications += 1
 

@@ -1,0 +1,145 @@
+from __future__ import annotations
+
+import hashlib
+import re
+from dataclasses import dataclass
+from functools import lru_cache
+
+from bot.config import (
+    BUDGET_DROP_RUB,
+    DEADLINE_DROP_DAYS,
+    GRAY_BUDGET_RUB,
+    GRAY_KEYWORDS,
+    GRAY_MODULE_COUNT,
+    GREEN_KEYWORDS,
+    MODULE_DROP_BUDGET_RUB,
+    MODULE_DROP_COUNT,
+    RED_KEYWORDS,
+)
+from bot.models import OrderCard
+
+GRAY_TITLE_PREFIX = "[⚠️ СЕРЫЙ] "
+
+REASON_RED = "blocked_by_red_list"
+REASON_NO_GREEN = "blocked_by_no_green_match"
+REASON_BUDGET = "blocked_by_budget"
+REASON_DEADLINE = "blocked_by_deadline"
+REASON_MODULES = "blocked_by_modules"
+REASON_TITLE = "blocked_by_title_repeat"
+REASON_ACCEPT = "accept"
+REASON_GRAY = "gray"
+
+_DAY = r"д(?:ень|ня|ней)"
+_DEADLINE_RES = (
+    re.compile(rf"\bза\s+(\d+)\s+{_DAY}\b"),
+    re.compile(rf"\bсрок\w*\s*[:\-]?\s*(\d+)\s+{_DAY}\b"),
+    re.compile(r"\bдедлайн\w*\s*[:\-]?\s*(\d+)"),
+    re.compile(r"\bdeadline\s*[:\-]?\s*(\d+)"),
+)
+_MODULE_RE = re.compile(r"\b(\d+)\s+(?:модул|страниц|экран)")
+_REMOTE_RE = re.compile(r"\bremote\b|(?<!\w)удален")
+_BOT_RE = re.compile(r"(?<!\w)бот|\btelegram\b|(?<!\w)телеграм")
+
+
+@dataclass(slots=True)
+class FilterDecision:
+    accept: bool
+    reason: str
+    gray: bool = False
+
+
+def title_hash(title: str) -> str:
+    normalized = " ".join(_normalize(title).split())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def parse_budget_rub(price: str) -> int | None:
+    compact = _normalize(price).replace(" ", "").replace("\u00a0", "")
+    if compact in {"", "-"}:
+        return None
+    match = re.search(r"\d+", compact)
+    if match is None:
+        return None
+    return int(match.group(0))
+
+
+def decide_card(card: OrderCard, *, title_repeat: bool) -> FilterDecision:
+    text = _normalize(f"{card.title}\n{card.description}")
+    if _is_red(text):
+        return FilterDecision(False, REASON_RED)
+    if not _has_any(text, GREEN_KEYWORDS):
+        return FilterDecision(False, REASON_NO_GREEN)
+
+    budget = parse_budget_rub(card.price)
+    if budget is not None and budget < BUDGET_DROP_RUB:
+        return FilterDecision(False, REASON_BUDGET)
+    deadline_days = _deadline_days(text)
+    if deadline_days is not None and deadline_days < DEADLINE_DROP_DAYS:
+        return FilterDecision(False, REASON_DEADLINE)
+    modules = _module_count(text)
+    if (
+        modules is not None
+        and modules > MODULE_DROP_COUNT
+        and budget is not None
+        and budget < MODULE_DROP_BUDGET_RUB
+    ):
+        return FilterDecision(False, REASON_MODULES)
+    if title_repeat:
+        return FilterDecision(False, REASON_TITLE)
+    if _is_gray(text, budget=budget, modules=modules):
+        return FilterDecision(True, REASON_GRAY, gray=True)
+    return FilterDecision(True, REASON_ACCEPT)
+
+
+def _normalize(value: str) -> str:
+    return value.lower().replace("ё", "е")
+
+
+def _is_red(text: str) -> bool:
+    if _has_any(text, RED_KEYWORDS):
+        return True
+    if _has(text, "нейросеть") and _BOT_RE.search(text) is None:
+        return True
+    city = _has(text, "москва") or _has(text, "санкт-петербург")
+    return city and _REMOTE_RE.search(text) is None
+
+
+def _is_gray(text: str, *, budget: int | None, modules: int | None) -> bool:
+    if _has_any(text, GRAY_KEYWORDS):
+        return True
+    if _has(text, "claude") and _has(text, "python"):
+        return True
+    if budget is not None and budget < GRAY_BUDGET_RUB:
+        return True
+    return budget is None and modules is not None and modules > GRAY_MODULE_COUNT
+
+
+def _deadline_days(text: str) -> int | None:
+    found = [int(match.group(1)) for pattern in _DEADLINE_RES for match in pattern.finditer(text)]
+    if not found:
+        return None
+    return min(found)
+
+
+def _module_count(text: str) -> int | None:
+    found = [int(match.group(1)) for match in _MODULE_RE.finditer(text)]
+    if not found:
+        return None
+    return max(found)
+
+
+def _has_any(text: str, terms: tuple[str, ...]) -> bool:
+    return any(_has(text, term) for term in terms)
+
+
+def _has(text: str, term: str) -> bool:
+    return _pattern(term).search(text) is not None
+
+
+@lru_cache(maxsize=256)
+def _pattern(term: str) -> re.Pattern[str]:
+    normalized = _normalize(term).strip()
+    body = re.escape(normalized).replace(r"\ ", r"\s+")
+    start = r"\b" if normalized[:1].isalnum() else r"(?<!\w)"
+    end = r"\b" if normalized[-1:].isalnum() else r"(?!\w)"
+    return re.compile(start + body + end)

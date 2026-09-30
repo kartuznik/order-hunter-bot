@@ -19,7 +19,7 @@ def main() -> None:
         {
             "success": True,
             "response": [
-                {"id": 15, "title": "Бот", "description": "текст", "price": 2500},
+                {"id": 15, "title": "Бот", "description": "текст", "price": 2500, "user_id": 9},
                 {"id": True, "title": "skip"},
             ],
         }
@@ -29,6 +29,7 @@ def main() -> None:
     assert cards[0].external_id == "15"
     assert cards[0].link == project_link(15) == "https://kwork.ru/projects/15"
     assert cards[0].price == "2500"
+    assert cards[0].user_id == 9
 
     try:
         cards_from_payload({"success": False, "error_code": 118})
