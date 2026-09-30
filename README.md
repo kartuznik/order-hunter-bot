@@ -40,9 +40,23 @@
 | Auth | HTTP Basic мобильного клиента + `token` в query после `POST /signIn` | sabraman `src/kwork/api.rs`, OpenAPI pykwork |
 | Цель | `POST /projects`, первая страница | OpenAPI pykwork, `get_projects` |
 | Ссылка карточки | `https://kwork.ru/projects/{id}` | `bot/kwork_html.py`, тот же шаблон у API-карточки |
-| User-Agent, принятый `signIn` | не снят | зонд не выполнен: `KWORK_PASSWORD` в `.env` пустой |
-| Единицы `date_confirm` | не сняты | тот же зонд |
-| Единицы `time_left` | не сняты | тот же зонд |
+| User-Agent, принятый `signIn` | не принят | `kwork-parser/0.1` не получил токен. Мобильного UA приложения в исходниках нет |
+| Единицы `date_confirm` | не сняты | до `/projects` зонд не дошёл |
+| Единицы `time_left` | не сняты | до `/projects` зонд не дошёл |
+
+Коды `error_code`, которые есть в исходниках. Кода 105 среди них нет.
+
+| Код | Что написано в источнике | Где |
+|---|---|---|
+| 100 | Пример общей ошибки: «Недостаточно параметров для метода API» | pykwork `docs/openapi.json`, схема `error` |
+| 101 | «Некорректные значения параметров» у `/getWebAuthToken` | pykwork `docs/openapi.json`, описание `/getWebAuthToken` |
+| 118 | Капча `signIn`: webview `http://kwork.ru/captcha_only` | pykwork `docs/openapi.json`, описание `/signIn` |
+| 151 | Пустой список `workerOrders`, не ошибка для остановки пагинации | sabraman `src/kwork/api.rs`, `get_worker_orders` |
+| 159 | Нет email у соцаккаунта, нужен `socialSignUp` | pykwork `docs/openapi.json`, `socialSignIn` |
+| 160 | Соцаккаунт с таким email уже есть | pykwork `docs/openapi.json`, `socialSignUp` |
+| 401, 403 | Повод один раз обновить токен, если код пришёл в JSON | sabraman `src/kwork/api.rs`, `post` |
+
+В `source/kwork/api.py` числовые коды не разобраны: при `success=false` клиент бросает текст поля `error`. Каталога `issues/` в клонах нет. У sabraman на GitHub issues 0. У pykwork 30 issues, в них нет «105», «error code» и «signIn»; рядом по смыслу только текст капчи и просьба ввести последние 4 цифры телефона, без номера кода.
 
 ## Запуск
 
