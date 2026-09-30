@@ -15,10 +15,11 @@ from bot.kwork_filter import (
     REASON_BUDGET,
     REASON_DEADLINE,
     REASON_GRAY,
+    REASON_LOW_SCORE,
     REASON_MODULES,
-    REASON_NO_GREEN,
     REASON_RED,
     REASON_TITLE,
+    calculate_green_score,
     decide_card,
     title_hash,
 )
@@ -43,11 +44,39 @@ def expect(order: OrderCard, reason: str, *, repeat: bool = False, gray: bool = 
     assert decision.gray is gray
 
 
-def main() -> None:
+def test_green_scores() -> None:
+    assert calculate_green_score("телеграм бот", "") == 4
+    assert calculate_green_score("парсер python", "") == 5
+    assert calculate_green_score("django сайт", "") == 3
+    assert calculate_green_score("просто телеграм", "") == 2
+    assert calculate_green_score("api интеграция", "") == 2
+    assert calculate_green_score("python api", "") == 4
+    assert calculate_green_score("telegram bot", "") == 4
+    assert calculate_green_score("ai llm python", "") == 9
+    assert calculate_green_score("openai интеграция", "") == 3
+    assert calculate_green_score("scraping парсер", "") == 4
+    assert calculate_green_score("github actions deploy", "") == 2
+
+
+def test_low_score_is_rejected() -> None:
+    expect(card("просто телеграм"), REASON_LOW_SCORE)
+    expect(card("api интеграция"), REASON_LOW_SCORE)
+    expect(card("github actions deploy"), REASON_LOW_SCORE)
+    expect(card("Нарисовать баннер", "для кафе"), REASON_LOW_SCORE)
+    expect(card("Починить email", "нужен парсер"), REASON_LOW_SCORE)
+    expect(card("Только claude", "без стека"), REASON_LOW_SCORE)
+
+
+def test_red_still_wins() -> None:
     expect(card("Сайт на react", "и python"), REASON_RED)
-    expect(card("Починить email", "нужен парсер"), REASON_ACCEPT)
+    expect(card("Бот на n8n", "и python api"), REASON_RED)
+    expect(card("Нейросеть для текстов", "python"), REASON_RED)
+    expect(card("Python, москва", "только этот город"), REASON_RED)
+    expect(card("Нужен middle+ python", "в команду"), REASON_RED)
+
+
+def test_score_then_budget_deadline_modules_and_gray() -> None:
     expect(card("Makeup лендинг", "python скрипт"), REASON_ACCEPT)
-    expect(card("Нарисовать баннер", "для кафе"), REASON_NO_GREEN)
     expect(card("Python бот", price="1500"), REASON_BUDGET)
     expect(card("Python бот", price="2500"), REASON_GRAY, gray=True)
     expect(card("Python бот", "нужно за 1 день"), REASON_DEADLINE)
@@ -55,17 +84,14 @@ def main() -> None:
     expect(card("Python сервис", "6 модулей в личном кабинете", price="8000"), REASON_MODULES)
     expect(card("Python сервис", "6 модулей", price="15000"), REASON_ACCEPT)
     expect(card("Python сервис", "4 модуля", price="-"), REASON_GRAY, gray=True)
-    expect(card("Бот на n8n", "и python api"), REASON_RED)
-    expect(card("Нейросеть для текстов", "python"), REASON_RED)
     expect(card("Нейросеть", "telegram bot на python"), REASON_ACCEPT)
-    expect(card("Python, москва", "только этот город"), REASON_RED)
     expect(card("Python", "москва, формат remote"), REASON_ACCEPT)
     expect(card("Claude помощник", "на python"), REASON_GRAY, gray=True)
-    expect(card("Только claude", "без стека"), REASON_NO_GREEN)
     expect(card("Python интеграция", "обычная задача"), REASON_TITLE, repeat=True)
     expect(card("CI/CD для сервиса", "github actions и python"), REASON_ACCEPT)
-    expect(card("Нужен middle+ python", "в команду"), REASON_RED)
 
+
+def test_user_id_from_payload() -> None:
     parsed = cards_from_payload(
         {
             "success": True,
@@ -78,6 +104,8 @@ def main() -> None:
     assert parsed[0].user_id == 42
     assert parsed[1].user_id is None
 
+
+def test_title_repeat_window() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         storage = SeenStorage(Path(tmp) / "orders.db")
         digest = title_hash("  Python   Бот ")
@@ -89,9 +117,3 @@ def main() -> None:
         with sqlite3.connect(Path(tmp) / "orders.db") as conn:
             conn.execute("UPDATE title_hashes SET seen_at = ?", (old,))
         assert storage.title_seen_within(digest, 7) is False
-
-    print("KWORK_FILTER_CASES_OK")
-
-
-if __name__ == "__main__":
-    main()

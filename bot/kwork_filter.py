@@ -11,7 +11,8 @@ from bot.config import (
     GRAY_BUDGET_RUB,
     GRAY_KEYWORDS,
     GRAY_MODULE_COUNT,
-    GREEN_KEYWORDS,
+    GREEN_SCORE_THRESHOLD,
+    GREEN_WEIGHTS,
     MODULE_DROP_BUDGET_RUB,
     MODULE_DROP_COUNT,
     RED_KEYWORDS,
@@ -21,7 +22,7 @@ from bot.models import OrderCard
 GRAY_TITLE_PREFIX = "[⚠️ СЕРЫЙ] "
 
 REASON_RED = "blocked_by_red_list"
-REASON_NO_GREEN = "blocked_by_no_green_match"
+REASON_LOW_SCORE = "blocked_by_low_score"
 REASON_BUDGET = "blocked_by_budget"
 REASON_DEADLINE = "blocked_by_deadline"
 REASON_MODULES = "blocked_by_modules"
@@ -67,8 +68,8 @@ def decide_card(card: OrderCard, *, title_repeat: bool) -> FilterDecision:
     text = _normalize(f"{card.title}\n{card.description}")
     if _is_red(text):
         return FilterDecision(False, REASON_RED)
-    if not _has_any(text, GREEN_KEYWORDS):
-        return FilterDecision(False, REASON_NO_GREEN)
+    if calculate_green_score(card.title, card.description) < GREEN_SCORE_THRESHOLD:
+        return FilterDecision(False, REASON_LOW_SCORE)
 
     budget = parse_budget_rub(card.price)
     if budget is not None and budget < BUDGET_DROP_RUB:
@@ -89,6 +90,11 @@ def decide_card(card: OrderCard, *, title_repeat: bool) -> FilterDecision:
     if _is_gray(text, budget=budget, modules=modules):
         return FilterDecision(True, REASON_GRAY, gray=True)
     return FilterDecision(True, REASON_ACCEPT)
+
+
+def calculate_green_score(title: str, description: str) -> int:
+    text = _normalize(f"{title}\n{description}")
+    return sum(weight for term, weight in GREEN_WEIGHTS.items() if _has(text, term))
 
 
 def _normalize(value: str) -> str:
