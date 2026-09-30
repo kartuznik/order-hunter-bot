@@ -49,3 +49,10 @@ class Notifier:
         for chat_id in self._settings.notify_chat_ids:
             await self._bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
         return True
+
+    async def send_owner_alert(self, text: str) -> None:
+        if self._settings.dry_run or not self._settings.notify_chat_ids:
+            logger.info("[DRY-RUN] %s", text)
+            return
+        for chat_id in self._settings.notify_chat_ids:
+            await self._bot.send_message(chat_id=chat_id, text=text)

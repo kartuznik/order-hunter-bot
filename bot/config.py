@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     FL_RSS_URL: str = Field(default="https://www.fl.ru/rss/all.xml")
     ENABLE_KWORK: bool = Field(default=False)
     KWORK_PROJECTS_URL: str = Field(default="https://kwork.ru/projects")
+    KWORK_TOKEN: str = Field(default="")
 
     CORE_KEYWORDS: str = Field(default=DEFAULT_CORE_KEYWORDS)
     SECONDARY_KEYWORDS: str = Field(default=DEFAULT_SECONDARY_KEYWORDS)
@@ -81,6 +82,10 @@ class Settings(BaseSettings):
     def dry_run(self) -> bool:
         token = self.TELEGRAM_BOT_TOKEN.strip()
         return not token or token.upper().startswith("PLACEHOLDER")
+
+    @property
+    def kwork_token(self) -> str:
+        return self.KWORK_TOKEN.strip()
 
     @property
     def imap_ready(self) -> bool:

@@ -13,7 +13,7 @@ class SeenStorage:
 
     @contextmanager
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
+        conn = sqlite3.connect(self._db_path, timeout=5.0)
         try:
             conn.row_factory = sqlite3.Row
             yield conn
@@ -33,6 +33,11 @@ class SeenStorage:
                     price TEXT,
                     created_at TEXT NOT NULL,
                     UNIQUE(source, external_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS kwork_notices (
+                    notice_key TEXT PRIMARY KEY,
+                    notice_value TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS poll_stats (
@@ -157,3 +162,30 @@ class SeenStorage:
             "total_rejected_and": int(row["total_rejected_and"]),
             "total_notified": int(row["total_notified"]),
         }
+
+    def get_notice(self, key: str) -> str | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT notice_value FROM kwork_notices WHERE notice_key = ?",
+                (key,),
+            ).fetchone()
+        if row is None:
+            return None
+        return str(row["notice_value"])
+
+    def set_notice(self, key: str, value: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO kwork_notices (notice_key, notice_value)
+                VALUES (?, ?)
+                ON CONFLICT(notice_key) DO UPDATE SET notice_value = excluded.notice_value
+                """,
+                (key, value),
+            )
+            conn.commit()
+
+    def clear_notice(self, key: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM kwork_notices WHERE notice_key = ?", (key,))
+            conn.commit()
