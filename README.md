@@ -5,7 +5,6 @@
 ## MVP scope
 
 - Kwork email notifications через IMAP-поллер (приоритетный источник, если настроен).
-- FL.ru RSS (`https://www.fl.ru/rss/all.xml`) с polling каждые 180 секунд.
 - Фильтр качества по схеме core+secondary:
   - минимум 1 совпадение из ядра (`bot/бот/telegram/телеграм/tg`)
   - минимум 1 совпадение из вторичных терминов
@@ -93,8 +92,6 @@ journalctl -u order-hunter-bot -n 50
 ## Live-check уведомлений
 
 ```bash
-venv/bin/python scripts/live_check.py
-venv/bin/python scripts/live_check_fl.py
 venv/bin/python scripts/live_check_kwork.py
 ```
 
