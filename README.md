@@ -38,7 +38,7 @@
 
 | Факт | Значение | Откуда |
 |---|---|---|
-| Auth | HTTP Basic мобильного клиента + `token` в query после `POST /signIn` | sabraman `src/kwork/api.rs`, OpenAPI pykwork |
+| Auth | HTTP Basic мобильного клиента + `token` в query. Токен берётся из `.env`, код `signIn` не вызывает | зонд `/projects` 30 Sep 2026, OpenAPI pykwork |
 | Цель | `POST /projects`, первая страница | OpenAPI pykwork, `get_projects` |
 | Ссылка карточки | `https://kwork.ru/projects/{id}` | `bot/kwork_html.py`, тот же шаблон у API-карточки |
 | User-Agent, принятый `/projects` | `kwork-parser/0.1` | тот же запрос. `signIn` этим UA с VPS токен не получил |
