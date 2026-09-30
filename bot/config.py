@@ -36,7 +36,6 @@ class Settings(BaseSettings):
     ENABLE_KWORK: bool = Field(default=False)
     KWORK_PROJECTS_URL: str = Field(default="https://kwork.ru/projects")
     KWORK_TOKEN: str = Field(default="")
-    KWORK_TOKEN_EXPIRES: str = Field(default="")
 
     CORE_KEYWORDS: str = Field(default=DEFAULT_CORE_KEYWORDS)
     SECONDARY_KEYWORDS: str = Field(default=DEFAULT_SECONDARY_KEYWORDS)
@@ -87,16 +86,6 @@ class Settings(BaseSettings):
     @property
     def kwork_token(self) -> str:
         return self.KWORK_TOKEN.strip()
-
-    @property
-    def kwork_token_expires(self) -> int:
-        raw = self.KWORK_TOKEN_EXPIRES.strip()
-        if not raw:
-            return 0
-        try:
-            return int(raw)
-        except ValueError:
-            return 0
 
     @property
     def imap_ready(self) -> bool:

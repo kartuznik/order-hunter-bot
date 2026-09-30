@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 import random
-from datetime import UTC, datetime
 from typing import Any
 
 import aiohttp
@@ -24,16 +23,17 @@ MAX_BYTES = 2 * 1024 * 1024
 POLL_BASE_SECONDS = 300
 JITTER_MIN_SECONDS = 30
 JITTER_MAX_SECONDS = 90
-EXPIRY_ALERT_SECONDS = 72 * 3600
 MISSING_TOKEN_HINT = (
     "Нет Kwork-токена. Обнови его командой signIn с домашней машины, это займёт две минуты."
 )
-PROJECTS_PROBLEM = (
-    "Kwork /projects не принял токен или форму ответа. Обнови токен вручную с домашней машины."
+TOKEN_STALE = (
+    "Kwork-токен протух, обнови вручную с домашней машины (curl signIn) "
+    "и положи новый KWORK_TOKEN в .env"
 )
+SHAPE_PROBLEM = "Kwork /projects вернул неожиданную форму ответа."
 NOTICE_MISSING = "missing_token"
-NOTICE_PROJECTS = "projects_rejected"
-NOTICE_EXPIRY = "token_expiry"
+NOTICE_AUTH = "projects_auth"
+NOTICE_SHAPE = "projects_shape"
 
 
 class KworkRejected(Exception):
@@ -44,19 +44,6 @@ class KworkRejected(Exception):
 
 def project_link(project_id: int) -> str:
     return f"https://kwork.ru/projects/{project_id}"
-
-
-def expiry_alert_text(expires: int) -> str:
-    when = datetime.fromtimestamp(expires, tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
-    return f"Kwork-токен истечёт {when}, обнови вручную"
-
-
-def expiry_alert_due(expires: int, now: float, alerted_expires: str | None) -> bool:
-    if expires <= 0:
-        return False
-    if expires - now >= EXPIRY_ALERT_SECONDS:
-        return False
-    return alerted_expires != str(expires)
 
 
 def next_wait_seconds() -> tuple[int, int]:
@@ -178,21 +165,16 @@ async def _kwork_tick(*, storage: SeenStorage, notifier: Notifier, accept_cards)
         return
     storage.clear_notice(NOTICE_MISSING)
 
-    expires = settings.kwork_token_expires
-    if expiry_alert_due(expires, datetime.now(tz=UTC).timestamp(), storage.get_notice(NOTICE_EXPIRY)):
-        text = expiry_alert_text(expires)
-        try:
-            await notifier.send_owner_alert(text)
-        except Exception as error:
-            logger.error("Kwork expiry alert failed kind=%s", type(error).__name__)
-        else:
-            storage.set_notice(NOTICE_EXPIRY, str(expires))
-
     try:
         cards = await fetch_kwork_projects(token)
     except KworkRejected as error:
         logger.error("Kwork projects rejected kind=%s", error.kind)
-        await _alert_once(storage, notifier, NOTICE_PROJECTS, PROJECTS_PROBLEM)
+        if error.kind == "auth":
+            await _alert_once(storage, notifier, NOTICE_AUTH, TOKEN_STALE)
+        elif error.kind == "shape":
+            await _alert_once(storage, notifier, NOTICE_SHAPE, SHAPE_PROBLEM)
         return
-    storage.clear_notice(NOTICE_PROJECTS)
+    storage.clear_notice(NOTICE_AUTH)
+    storage.clear_notice(NOTICE_SHAPE)
+    logger.info("Kwork poll complete cards=%s", len(cards))
     await accept_cards(cards)

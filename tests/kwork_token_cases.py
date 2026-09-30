@@ -10,8 +10,6 @@ from bot.database import SeenStorage
 from bot.kwork_api import (
     KworkRejected,
     cards_from_payload,
-    expiry_alert_due,
-    expiry_alert_text,
     project_link,
 )
 
@@ -46,23 +44,13 @@ def main() -> None:
     else:
         raise AssertionError("object response must be rejected")
 
-    now = 1_700_000_000.0
-    soon = int(now + 3600)
-    far = int(now + 80 * 3600)
-    assert expiry_alert_due(soon, now, None) is True
-    assert expiry_alert_due(soon, now, str(soon)) is False
-    assert expiry_alert_due(far, now, None) is False
-    assert expiry_alert_due(0, now, None) is False
-    assert expiry_alert_text(soon).startswith("Kwork-токен истечёт ")
-    assert expiry_alert_text(soon).endswith(", обнови вручную")
-
     with tempfile.TemporaryDirectory() as folder:
         storage = SeenStorage(Path(folder) / "probe.db")
-        assert storage.get_notice("token_expiry") is None
-        storage.set_notice("token_expiry", str(soon))
-        assert storage.get_notice("token_expiry") == str(soon)
-        storage.clear_notice("token_expiry")
-        assert storage.get_notice("token_expiry") is None
+        assert storage.get_notice("projects_auth") is None
+        storage.set_notice("projects_auth", "sent")
+        assert storage.get_notice("projects_auth") == "sent"
+        storage.clear_notice("projects_auth")
+        assert storage.get_notice("projects_auth") is None
 
     print("KWORK_TOKEN_CASES_OK")
 
