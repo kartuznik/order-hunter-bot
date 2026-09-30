@@ -34,6 +34,7 @@ async def _accept_cards(
     notifier: Notifier,
     cards: list[OrderCard],
 ) -> dict[str, int]:
+    settings = get_settings()
     seen_total = 0
     passed_filter = 0
     blocked_by_negative = 0
@@ -47,7 +48,16 @@ async def _accept_cards(
             title_repeat=storage.title_seen_within(title_hash(card.title), TITLE_REPEAT_DAYS),
         )
         if not decision.accept:
-            logger.info("Kwork filter id=%s reason=%s", card.external_id, decision.reason)
+            if settings.DEBUG_FILTER_LOGS:
+                logger.info(
+                    "Kwork filter id=%s title=%s reason=%s score=%s",
+                    card.external_id,
+                    card.title.replace("\n", " ")[:60],
+                    decision.reason,
+                    decision.score,
+                )
+            else:
+                logger.info("Kwork filter id=%s reason=%s", card.external_id, decision.reason)
             if decision.reason == "blocked_by_red_list":
                 blocked_by_negative += 1
             else:

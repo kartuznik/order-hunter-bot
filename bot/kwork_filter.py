@@ -77,6 +77,7 @@ class FilterDecision:
     accept: bool
     reason: str
     gray: bool = False
+    score: int = 0
 
 
 def title_hash(title: str) -> str:
@@ -96,17 +97,18 @@ def parse_budget_rub(price: str) -> int | None:
 
 def decide_card(card: OrderCard, *, title_repeat: bool) -> FilterDecision:
     text = _normalize(f"{card.title}\n{card.description}")
+    score = calculate_green_score(card.title, card.description)
     if _is_red(text):
-        return FilterDecision(False, REASON_RED)
-    if calculate_green_score(card.title, card.description) < GREEN_SCORE_THRESHOLD:
-        return FilterDecision(False, REASON_LOW_SCORE)
+        return FilterDecision(False, REASON_RED, score=score)
+    if score < GREEN_SCORE_THRESHOLD:
+        return FilterDecision(False, REASON_LOW_SCORE, score=score)
 
     budget = parse_budget_rub(card.price)
     if budget is not None and budget < BUDGET_DROP_RUB:
-        return FilterDecision(False, REASON_BUDGET)
+        return FilterDecision(False, REASON_BUDGET, score=score)
     deadline_days = _deadline_days(text)
     if deadline_days is not None and deadline_days < DEADLINE_DROP_DAYS:
-        return FilterDecision(False, REASON_DEADLINE)
+        return FilterDecision(False, REASON_DEADLINE, score=score)
     modules = _module_count(text)
     if (
         modules is not None
@@ -114,12 +116,12 @@ def decide_card(card: OrderCard, *, title_repeat: bool) -> FilterDecision:
         and budget is not None
         and budget < MODULE_DROP_BUDGET_RUB
     ):
-        return FilterDecision(False, REASON_MODULES)
+        return FilterDecision(False, REASON_MODULES, score=score)
     if title_repeat:
-        return FilterDecision(False, REASON_TITLE)
+        return FilterDecision(False, REASON_TITLE, score=score)
     if _is_gray(text, budget=budget, modules=modules):
-        return FilterDecision(True, REASON_GRAY, gray=True)
-    return FilterDecision(True, REASON_ACCEPT)
+        return FilterDecision(True, REASON_GRAY, gray=True, score=score)
+    return FilterDecision(True, REASON_ACCEPT, score=score)
 
 
 def calculate_green_score(title: str, description: str) -> int:
