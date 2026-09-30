@@ -31,8 +31,6 @@ class Settings(BaseSettings):
     KWORK_EMAIL_FROM: str = Field(default="mail@kwork.ru")
     KWORK_EMAIL_SUBJECT_HINT: str = Field(default="")
 
-    ENABLE_FL: bool = Field(default=True)
-    FL_RSS_URL: str = Field(default="https://www.fl.ru/rss/all.xml")
     ENABLE_KWORK: bool = Field(default=False)
     KWORK_PROJECTS_URL: str = Field(default="https://kwork.ru/projects")
     KWORK_TOKEN: str = Field(default="")
