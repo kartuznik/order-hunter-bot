@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 
@@ -38,6 +38,11 @@ class SeenStorage:
                 CREATE TABLE IF NOT EXISTS kwork_notices (
                     notice_key TEXT PRIMARY KEY,
                     notice_value TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS title_hashes (
+                    title_hash TEXT PRIMARY KEY,
+                    seen_at TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS poll_stats (
@@ -105,6 +110,31 @@ class SeenStorage:
                 return True
             except sqlite3.IntegrityError:
                 return False
+
+    def title_seen_within(self, title_hash: str, days: int) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT seen_at FROM title_hashes WHERE title_hash = ?",
+                (title_hash,),
+            ).fetchone()
+        if row is None:
+            return False
+        seen_at = datetime.fromisoformat(str(row["seen_at"]))
+        if seen_at.tzinfo is None:
+            seen_at = seen_at.replace(tzinfo=UTC)
+        return datetime.now(tz=UTC) - seen_at < timedelta(days=days)
+
+    def remember_title(self, title_hash: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO title_hashes (title_hash, seen_at)
+                VALUES (?, ?)
+                ON CONFLICT(title_hash) DO UPDATE SET seen_at = excluded.seen_at
+                """,
+                (title_hash, datetime.now(tz=UTC).isoformat()),
+            )
+            conn.commit()
 
     def bump_stats(
         self,

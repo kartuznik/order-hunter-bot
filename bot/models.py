@@ -11,3 +11,4 @@ class OrderCard:
     link: str
     description: str
     price: str
+    user_id: int | None = None
