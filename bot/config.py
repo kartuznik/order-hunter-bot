@@ -36,6 +36,7 @@ GREEN_WEIGHTS: dict[str, int] = {
     "anthropic": 2,
     "telegram": 2,
     "телеграм": 2,
+    "телеграмм": 2,
     "телега": 2,
     "тг": 2,
     "бот": 2,
@@ -168,6 +169,19 @@ RED_KEYWORDS: tuple[str, ...] = (
     "team lead",
     "офис",
     "гибрид",
+    "монтаж",
+    "видео",
+    "youtube",
+    "tiktok",
+    "тикток",
+    "ролики",
+    "blender",
+    "3d",
+    "3д",
+    "моделирование",
+    "мини-приложение",
+    "mini apps",
+    "мобильное приложение",
 )
 
 GRAY_KEYWORDS: tuple[str, ...] = (

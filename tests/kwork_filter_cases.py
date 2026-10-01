@@ -133,6 +133,38 @@ def test_user_id_from_payload() -> None:
     assert parsed[1].user_id is None
 
 
+def test_telegram_family_is_counted_once() -> None:
+    title = "Создать тг канал мах и телега новости"
+    assert calculate_green_score(title, "") <= 2
+    expect(card(title), REASON_LOW_SCORE)
+
+
+def test_video_mobile_and_mini_app_are_red() -> None:
+    mini = card("Доработка Mini Apps")
+    mobile = card("Разработка мобильного приложения")
+    montage = card("Монтаж YouTube роликов + AI сцены")
+    expect(mini, REASON_RED)
+    expect(mobile, REASON_RED)
+    expect(montage, REASON_RED)
+    assert decide_card(montage, title_repeat=False).matched_red == "монтаж"
+    expect(card("Нужен монтаж роликов"), REASON_RED)
+    expect(card("Сделать мобильного приложения на заказ"), REASON_RED)
+
+
+def test_relevant_bot_and_ai_check_still_pass() -> None:
+    bot_title = "Разработка телеграмм бота"
+    assert calculate_green_score(bot_title, "") >= 3
+    expect(card(bot_title), REASON_ACCEPT)
+    ai_title = "AI-проверка домашних заданий"
+    assert calculate_green_score(ai_title, "") >= 3
+    expect(card(ai_title), REASON_ACCEPT)
+
+
+def test_cheap_price_without_green_core_is_not_gray() -> None:
+    expect(card("телеграм бот", price="2500"), REASON_ACCEPT)
+    expect(card("Python бот", price="2500"), REASON_GRAY, gray=True)
+
+
 def test_title_repeat_window() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         storage = SeenStorage(Path(tmp) / "orders.db")
