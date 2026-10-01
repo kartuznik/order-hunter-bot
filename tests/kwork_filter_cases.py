@@ -160,6 +160,32 @@ def test_relevant_bot_and_ai_check_still_pass() -> None:
     expect(card(ai_title), REASON_ACCEPT)
 
 
+def test_rental_and_cyrillic_smm_descriptions_are_red() -> None:
+    rental = card(
+        "Аренда сервера на неделю",
+        "VPS/VDS не подходят. оплата сразу за весь период.",
+    )
+    rental_decision = decide_card(rental, title_repeat=False)
+    assert rental_decision.reason == REASON_RED
+    assert rental_decision.matched_red == "аренда"
+
+    smm = card(
+        "Раскрутка СММ",
+        "нужно вести тг, ок, вк. оплата 10000/мес.",
+    )
+    smm_decision = decide_card(smm, title_repeat=False)
+    assert smm_decision.reason == REASON_RED
+    assert smm_decision.matched_red == "смм"
+
+
+def test_python_bot_with_payment_still_passes() -> None:
+    order = card("Python бот, оплата через Юкассу")
+    decision = decide_card(order, title_repeat=False)
+    assert decision.reason == REASON_ACCEPT
+    assert decision.accept is True
+    assert decision.matched_green == "python, бот, юкасса, оплата"
+
+
 def test_cheap_price_without_green_core_is_not_gray() -> None:
     expect(card("телеграм бот", price="2500"), REASON_ACCEPT)
     expect(card("Python бот", price="2500"), REASON_GRAY, gray=True)

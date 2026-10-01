@@ -80,6 +80,13 @@ async def _accept_cards(
                 rejected_by_and_logic += 1
             continue
         passed_filter += 1
+        logger.info(
+            'Kwork filter id=%s title=%s accepted score=%s matched_green="%s"',
+            card.external_id,
+            card.title.replace("\n", " ")[:60],
+            decision.score,
+            decision.matched_green,
+        )
         if storage.is_seen(card.source, card.external_id):
             continue
         outgoing = card
