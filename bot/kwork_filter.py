@@ -50,7 +50,7 @@ _RU_ENDINGS = (
     "ый",
     "ий",
     "ые",
-    "ие",
+    "ое",
     "а",
     "я",
     "ы",
@@ -72,12 +72,16 @@ _REMOTE_RE = re.compile(r"\bremote\b|(?<!\w)удален")
 _BOT_RE = re.compile(r"(?<!\w)бот|\btelegram\b|(?<!\w)телеграм")
 
 
+_TELEGRAM_FAMILY = frozenset({"telegram", "телеграм", "телеграмм", "телега", "тг"})
+
+
 @dataclass(slots=True)
 class FilterDecision:
     accept: bool
     reason: str
     gray: bool = False
     score: int = 0
+    matched_red: str = ""
 
 
 def title_hash(title: str) -> str:
@@ -98,8 +102,9 @@ def parse_budget_rub(price: str) -> int | None:
 def decide_card(card: OrderCard, *, title_repeat: bool) -> FilterDecision:
     text = _normalize(f"{card.title}\n{card.description}")
     score = calculate_green_score(card.title, card.description)
-    if _is_red(text):
-        return FilterDecision(False, REASON_RED, score=score)
+    matched_red = _matched_red(text)
+    if matched_red is not None:
+        return FilterDecision(False, REASON_RED, score=score, matched_red=matched_red)
     if score < GREEN_SCORE_THRESHOLD:
         return FilterDecision(False, REASON_LOW_SCORE, score=score)
 
@@ -127,7 +132,17 @@ def decide_card(card: OrderCard, *, title_repeat: bool) -> FilterDecision:
 def calculate_green_score(title: str, description: str) -> int:
     text = _normalize(f"{title}\n{description}")
     stems = [_stem_token(token) for token in _TOKEN_RE.findall(text)]
-    return sum(weight for term, weight in GREEN_WEIGHTS.items() if _weight_term_matches(text, stems, term))
+    score = 0
+    family_counted = False
+    for term, weight in GREEN_WEIGHTS.items():
+        if not _weight_term_matches(text, stems, term):
+            continue
+        if term in _TELEGRAM_FAMILY:
+            if family_counted:
+                continue
+            family_counted = True
+        score += weight
+    return score
 
 
 def _normalize(value: str) -> str:
@@ -156,13 +171,26 @@ def _weight_term_matches(text: str, stems: list[str], term: str) -> bool:
     return any(stems[index : index + width] == wanted for index in range(len(stems) - width + 1))
 
 
-def _is_red(text: str) -> bool:
-    if _has_any(text, RED_KEYWORDS):
-        return True
+def _matched_red(text: str) -> str | None:
+    stems = [_stem_token(token) for token in _TOKEN_RE.findall(text)]
+    for term in RED_KEYWORDS:
+        if _weight_term_matches(text, stems, term):
+            return term
     if _has(text, "нейросеть") and _BOT_RE.search(text) is None:
-        return True
-    city = _has(text, "москва") or _has(text, "санкт-петербург")
-    return city and _REMOTE_RE.search(text) is None
+        return "нейросеть"
+    if _has(text, "москва") and _REMOTE_RE.search(text) is None:
+        return "москва"
+    if _has(text, "санкт-петербург") and _REMOTE_RE.search(text) is None:
+        return "санкт-петербург"
+    return None
+
+
+def _has_green_core(text: str) -> bool:
+    stems = [_stem_token(token) for token in _TOKEN_RE.findall(text)]
+    return any(
+        weight >= 3 and _weight_term_matches(text, stems, term)
+        for term, weight in GREEN_WEIGHTS.items()
+    )
 
 
 def _is_gray(text: str, *, budget: int | None, modules: int | None) -> bool:
@@ -170,7 +198,7 @@ def _is_gray(text: str, *, budget: int | None, modules: int | None) -> bool:
         return True
     if _has(text, "claude") and _has(text, "python"):
         return True
-    if budget is not None and budget < GRAY_BUDGET_RUB:
+    if budget is not None and budget < GRAY_BUDGET_RUB and _has_green_core(text):
         return True
     return budget is None and modules is not None and modules > GRAY_MODULE_COUNT
 

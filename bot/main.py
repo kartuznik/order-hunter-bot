@@ -48,13 +48,29 @@ async def _accept_cards(
             title_repeat=storage.title_seen_within(title_hash(card.title), TITLE_REPEAT_DAYS),
         )
         if not decision.accept:
-            if settings.DEBUG_FILTER_LOGS:
+            if settings.DEBUG_FILTER_LOGS and decision.matched_red:
+                logger.info(
+                    'Kwork filter id=%s title=%s reason=%s score=%s matched_red="%s"',
+                    card.external_id,
+                    card.title.replace("\n", " ")[:60],
+                    decision.reason,
+                    decision.score,
+                    decision.matched_red,
+                )
+            elif settings.DEBUG_FILTER_LOGS:
                 logger.info(
                     "Kwork filter id=%s title=%s reason=%s score=%s",
                     card.external_id,
                     card.title.replace("\n", " ")[:60],
                     decision.reason,
                     decision.score,
+                )
+            elif decision.matched_red:
+                logger.info(
+                    'Kwork filter id=%s reason=%s matched_red="%s"',
+                    card.external_id,
+                    decision.reason,
+                    decision.matched_red,
                 )
             else:
                 logger.info("Kwork filter id=%s reason=%s", card.external_id, decision.reason)
