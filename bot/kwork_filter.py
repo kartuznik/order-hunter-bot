@@ -82,6 +82,7 @@ class FilterDecision:
     gray: bool = False
     score: int = 0
     matched_red: str = ""
+    matched_green: str = ""
 
 
 def title_hash(title: str) -> str:
@@ -101,19 +102,32 @@ def parse_budget_rub(price: str) -> int | None:
 
 def decide_card(card: OrderCard, *, title_repeat: bool) -> FilterDecision:
     text = _normalize(f"{card.title}\n{card.description}")
-    score = calculate_green_score(card.title, card.description)
+    hits = _green_hits(card.title, card.description)
+    score = sum(weight for _, weight in hits)
+    matched_green = ", ".join(term for term, _ in hits)
     matched_red = _matched_red(text)
+
+    def decision(accept: bool, reason: str, *, gray: bool = False, red: str = "") -> FilterDecision:
+        return FilterDecision(
+            accept,
+            reason,
+            gray=gray,
+            score=score,
+            matched_red=red,
+            matched_green=matched_green,
+        )
+
     if matched_red is not None:
-        return FilterDecision(False, REASON_RED, score=score, matched_red=matched_red)
+        return decision(False, REASON_RED, red=matched_red)
     if score < GREEN_SCORE_THRESHOLD:
-        return FilterDecision(False, REASON_LOW_SCORE, score=score)
+        return decision(False, REASON_LOW_SCORE)
 
     budget = parse_budget_rub(card.price)
     if budget is not None and budget < BUDGET_DROP_RUB:
-        return FilterDecision(False, REASON_BUDGET, score=score)
+        return decision(False, REASON_BUDGET)
     deadline_days = _deadline_days(text)
     if deadline_days is not None and deadline_days < DEADLINE_DROP_DAYS:
-        return FilterDecision(False, REASON_DEADLINE, score=score)
+        return decision(False, REASON_DEADLINE)
     modules = _module_count(text)
     if (
         modules is not None
@@ -121,18 +135,22 @@ def decide_card(card: OrderCard, *, title_repeat: bool) -> FilterDecision:
         and budget is not None
         and budget < MODULE_DROP_BUDGET_RUB
     ):
-        return FilterDecision(False, REASON_MODULES, score=score)
+        return decision(False, REASON_MODULES)
     if title_repeat:
-        return FilterDecision(False, REASON_TITLE, score=score)
+        return decision(False, REASON_TITLE)
     if _is_gray(text, budget=budget, modules=modules):
-        return FilterDecision(True, REASON_GRAY, gray=True, score=score)
-    return FilterDecision(True, REASON_ACCEPT, score=score)
+        return decision(True, REASON_GRAY, gray=True)
+    return decision(True, REASON_ACCEPT)
 
 
 def calculate_green_score(title: str, description: str) -> int:
+    return sum(weight for _, weight in _green_hits(title, description))
+
+
+def _green_hits(title: str, description: str) -> list[tuple[str, int]]:
     text = _normalize(f"{title}\n{description}")
     stems = [_stem_token(token) for token in _TOKEN_RE.findall(text)]
-    score = 0
+    hits: list[tuple[str, int]] = []
     family_counted = False
     for term, weight in GREEN_WEIGHTS.items():
         if not _weight_term_matches(text, stems, term):
@@ -141,8 +159,8 @@ def calculate_green_score(title: str, description: str) -> int:
             if family_counted:
                 continue
             family_counted = True
-        score += weight
-    return score
+        hits.append((term, weight))
+    return hits
 
 
 def _normalize(value: str) -> str:
