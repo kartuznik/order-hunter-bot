@@ -19,6 +19,7 @@ from bot.kwork_filter import (
     REASON_MODULES,
     REASON_RED,
     REASON_TITLE,
+    REASON_TITLE_SCORE,
     calculate_green_score,
     decide_card,
     title_hash,
@@ -76,8 +77,8 @@ def test_stemmer_does_not_match_latin_substrings() -> None:
     assert calculate_green_score("makeup", "") == 0
     assert calculate_green_score("fastapi", "") == 3
     assert calculate_green_score("chatgpt", "") == 2
-    expect(card("Рассылка email"), REASON_LOW_SCORE)
-    expect(card("Makeup для визитки"), REASON_LOW_SCORE)
+    expect(card("Рассылка email"), REASON_TITLE_SCORE)
+    expect(card("Makeup для визитки"), REASON_TITLE_SCORE)
 
 
 def test_owner_inflected_title_reaches_threshold() -> None:
@@ -90,21 +91,21 @@ def test_low_score_is_rejected() -> None:
     expect(card("просто телеграм"), REASON_LOW_SCORE)
     expect(card("api интеграция"), REASON_LOW_SCORE)
     expect(card("github actions deploy"), REASON_LOW_SCORE)
-    expect(card("Нарисовать баннер", "для кафе"), REASON_LOW_SCORE)
-    expect(card("Починить email", "нужен парсер"), REASON_LOW_SCORE)
+    expect(card("Нарисовать баннер", "для кафе"), REASON_TITLE_SCORE)
+    expect(card("Починить email", "нужен парсер"), REASON_TITLE_SCORE)
     expect(card("Только claude", "без стека"), REASON_LOW_SCORE)
 
 
 def test_red_still_wins() -> None:
-    expect(card("Сайт на react", "и python"), REASON_RED)
+    expect(card("Сайт на react", "и python"), REASON_TITLE_SCORE)
     expect(card("Бот на n8n", "и python api"), REASON_RED)
-    expect(card("Нейросеть для текстов", "python"), REASON_RED)
+    expect(card("Нейросеть для текстов", "python"), REASON_TITLE_SCORE)
     expect(card("Python, москва", "только этот город"), REASON_RED)
     expect(card("Нужен middle+ python", "в команду"), REASON_RED)
 
 
 def test_score_then_budget_deadline_modules_and_gray() -> None:
-    expect(card("Makeup лендинг", "python скрипт"), REASON_ACCEPT)
+    expect(card("Makeup лендинг", "python скрипт"), REASON_TITLE_SCORE)
     expect(card("Python бот", price="1500"), REASON_BUDGET)
     expect(card("Python бот", price="2500"), REASON_GRAY, gray=True)
     expect(card("Python бот", "нужно за 1 день"), REASON_DEADLINE)
@@ -112,11 +113,11 @@ def test_score_then_budget_deadline_modules_and_gray() -> None:
     expect(card("Python сервис", "6 модулей в личном кабинете", price="8000"), REASON_MODULES)
     expect(card("Python сервис", "6 модулей", price="15000"), REASON_ACCEPT)
     expect(card("Python сервис", "4 модуля", price="-"), REASON_GRAY, gray=True)
-    expect(card("Нейросеть", "telegram bot на python"), REASON_ACCEPT)
+    expect(card("Нейросеть", "telegram bot на python"), REASON_TITLE_SCORE)
     expect(card("Python", "москва, формат remote"), REASON_ACCEPT)
     expect(card("Claude помощник", "на python"), REASON_GRAY, gray=True)
     expect(card("Python интеграция", "обычная задача"), REASON_TITLE, repeat=True)
-    expect(card("CI/CD для сервиса", "github actions и python"), REASON_ACCEPT)
+    expect(card("CI/CD для сервиса", "github actions и python"), REASON_TITLE_SCORE)
 
 
 def test_user_id_from_payload() -> None:
@@ -143,12 +144,12 @@ def test_video_mobile_and_mini_app_are_red() -> None:
     mini = card("Доработка Mini Apps")
     mobile = card("Разработка мобильного приложения")
     montage = card("Монтаж YouTube роликов + AI сцены")
-    expect(mini, REASON_RED)
-    expect(mobile, REASON_RED)
+    expect(mini, REASON_TITLE_SCORE)
+    expect(mobile, REASON_TITLE_SCORE)
     expect(montage, REASON_RED)
     assert decide_card(montage, title_repeat=False).matched_red == "монтаж"
-    expect(card("Нужен монтаж роликов"), REASON_RED)
-    expect(card("Сделать мобильного приложения на заказ"), REASON_RED)
+    expect(card("Python монтаж роликов"), REASON_RED)
+    expect(card("Сделать мобильного приложения на заказ"), REASON_TITLE_SCORE)
 
 
 def test_relevant_bot_and_ai_check_still_pass() -> None:
@@ -166,16 +167,20 @@ def test_rental_and_cyrillic_smm_descriptions_are_red() -> None:
         "VPS/VDS не подходят. оплата сразу за весь период.",
     )
     rental_decision = decide_card(rental, title_repeat=False)
-    assert rental_decision.reason == REASON_RED
-    assert rental_decision.matched_red == "аренда"
+    assert rental_decision.reason == REASON_TITLE_SCORE
+    rental_with_core = decide_card(card("Python аренда сервера"), title_repeat=False)
+    assert rental_with_core.reason == REASON_RED
+    assert rental_with_core.matched_red == "аренда"
 
     smm = card(
         "Раскрутка СММ",
         "нужно вести тг, ок, вк. оплата 10000/мес.",
     )
     smm_decision = decide_card(smm, title_repeat=False)
-    assert smm_decision.reason == REASON_RED
-    assert smm_decision.matched_red == "смм"
+    assert smm_decision.reason == REASON_TITLE_SCORE
+    smm_with_core = decide_card(card("Python раскрутка смм"), title_repeat=False)
+    assert smm_with_core.reason == REASON_RED
+    assert smm_with_core.matched_red == "смм"
 
 
 def test_python_bot_with_payment_still_passes() -> None:
@@ -184,6 +189,29 @@ def test_python_bot_with_payment_still_passes() -> None:
     assert decision.reason == REASON_ACCEPT
     assert decision.accept is True
     assert decision.matched_green == "python, бот, юкасса, оплата"
+
+
+def test_title_score_blocks_description_only_hits() -> None:
+    promo = card("Продвижение по поиску клиентов", "разработка ботов")
+    assert decide_card(promo, title_repeat=False).reason == REASON_TITLE_SCORE
+
+    photo = card("Обработать фото undetectable.ai")
+    assert calculate_green_score(photo.title, "") == 0
+    assert decide_card(photo, title_repeat=False).reason == REASON_TITLE_SCORE
+    assert calculate_green_score("нужен ai бот", "") == 5
+
+    finished = card("Доделать ботом интеграцию")
+    finished_decision = decide_card(finished, title_repeat=False)
+    assert finished_decision.reason == REASON_ACCEPT
+    assert "бот" in finished_decision.matched_green
+
+    parser = card("Парсер на python")
+    assert calculate_green_score(parser.title, "") >= 2
+    assert decide_card(parser, title_repeat=False).reason == REASON_ACCEPT
+
+    amo = card("Модуль для риелторов amoCRM")
+    assert calculate_green_score(amo.title, "") < 2
+    assert decide_card(amo, title_repeat=False).reason == REASON_TITLE_SCORE
 
 
 def test_cheap_price_without_green_core_is_not_gray() -> None:
