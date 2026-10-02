@@ -274,7 +274,7 @@ class Settings(BaseSettings):
     def db_file(self) -> Path:
         path = Path(self.DB_PATH)
         if not path.is_absolute():
-            path = Path("/opt/bots/order-hunter-bot") / path
+            path = Path(__file__).resolve().parent.parent / path
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
 

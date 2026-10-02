@@ -11,6 +11,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from bot.database import SeenStorage
 from bot.kwork_api import cards_from_payload
 from bot.kwork_filter import (
+    _matched_red,
     REASON_ACCEPT,
     REASON_BUDGET,
     REASON_DEADLINE,
@@ -79,6 +80,14 @@ def test_stemmer_does_not_match_latin_substrings() -> None:
     assert calculate_green_score("chatgpt", "") == 2
     expect(card("Рассылка email"), REASON_TITLE_SCORE)
     expect(card("Makeup для визитки"), REASON_TITLE_SCORE)
+
+
+def test_email_does_not_match_red_ml() -> None:
+    assert _matched_red("email") is None
+    assert _matched_red("рассылка email") is None
+    decision = decide_card(card("Python email"), title_repeat=False)
+    assert decision.reason == REASON_ACCEPT
+    assert decision.matched_red == ""
 
 
 def test_owner_inflected_title_reaches_threshold() -> None:
