@@ -13,6 +13,7 @@ from bot.config import (
     GRAY_MODULE_COUNT,
     GREEN_SCORE_THRESHOLD,
     GREEN_WEIGHTS,
+    TITLE_SCORE_MIN,
     MODULE_DROP_BUDGET_RUB,
     MODULE_DROP_COUNT,
     RED_KEYWORDS,
@@ -27,6 +28,7 @@ REASON_BUDGET = "blocked_by_budget"
 REASON_DEADLINE = "blocked_by_deadline"
 REASON_MODULES = "blocked_by_modules"
 REASON_TITLE = "blocked_by_title_repeat"
+REASON_TITLE_SCORE = "blocked_by_title_score"
 REASON_ACCEPT = "accept"
 REASON_GRAY = "gray"
 
@@ -47,6 +49,9 @@ _RU_ENDINGS = (
     "ев",
     "ей",
     "ой",
+    "ом",
+    "ам",
+    "ми",
     "ый",
     "ий",
     "ые",
@@ -101,6 +106,16 @@ def parse_budget_rub(price: str) -> int | None:
 
 
 def decide_card(card: OrderCard, *, title_repeat: bool) -> FilterDecision:
+    title_hits = _green_hits(card.title, "")
+    title_score = sum(weight for _, weight in title_hits)
+    if title_score < TITLE_SCORE_MIN:
+        return FilterDecision(
+            False,
+            REASON_TITLE_SCORE,
+            score=title_score,
+            matched_green=", ".join(term for term, _ in title_hits),
+        )
+
     text = _normalize(f"{card.title}\n{card.description}")
     hits = _green_hits(card.title, card.description)
     score = sum(weight for _, weight in hits)
@@ -248,5 +263,7 @@ def _pattern(term: str) -> re.Pattern[str]:
     normalized = _normalize(term).strip()
     body = re.escape(normalized).replace(r"\ ", r"\s+")
     start = r"\b" if normalized[:1].isalnum() else r"(?<!\w)"
+    if len(normalized) <= 3 and normalized[:1].isalnum():
+        start = r"(?<!\.)" + start
     end = r"\b" if normalized[-1:].isalnum() else r"(?!\w)"
     return re.compile(start + body + end)

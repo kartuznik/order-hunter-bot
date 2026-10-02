@@ -109,6 +109,7 @@ GREEN_WEIGHTS: dict[str, int] = {
 }
 
 GREEN_SCORE_THRESHOLD = 3
+TITLE_SCORE_MIN = 2
 
 RED_KEYWORDS: tuple[str, ...] = (
     "salebot",
@@ -185,6 +186,12 @@ RED_KEYWORDS: tuple[str, ...] = (
     "смм",
     "раскрутка",
     "аренда",
+    "tilda",
+    "тильда",
+    "продвижение",
+    "привлечь",
+    "продюсирование",
+    "лидогенерация",
 )
 
 GRAY_KEYWORDS: tuple[str, ...] = (
