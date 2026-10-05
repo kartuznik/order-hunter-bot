@@ -116,7 +116,8 @@ def test_red_still_wins() -> None:
 def test_score_then_budget_deadline_modules_and_gray() -> None:
     expect(card("Makeup лендинг", "python скрипт"), REASON_TITLE_SCORE)
     expect(card("Python бот", price="1500"), REASON_BUDGET)
-    expect(card("Python бот", price="2500"), REASON_GRAY, gray=True)
+    expect(card("Python бот", price="4999"), REASON_BUDGET)
+    expect(card("Python бот", price="5000"), REASON_ACCEPT)
     expect(card("Python бот", "нужно за 1 день"), REASON_DEADLINE)
     expect(card("Python бот", "успеть за 2 дня"), REASON_GRAY, gray=True)
     expect(card("Python сервис", "6 модулей в личном кабинете", price="8000"), REASON_MODULES)
@@ -224,8 +225,19 @@ def test_title_score_blocks_description_only_hits() -> None:
 
 
 def test_cheap_price_without_green_core_is_not_gray() -> None:
-    expect(card("телеграм бот", price="2500"), REASON_ACCEPT)
-    expect(card("Python бот", price="2500"), REASON_GRAY, gray=True)
+    expect(card("телеграм бот", price="5000"), REASON_ACCEPT)
+    expect(card("телеграм бот", price="2500"), REASON_BUDGET)
+    expect(card("Python бот", price="2500"), REASON_BUDGET)
+    expect(card("Python бот", price="5000"), REASON_ACCEPT)
+
+
+def test_marketing_spam_is_blocked_and_dev_orders_pass() -> None:
+    expect(card("Отметки пользователей в Telegram Stories"), REASON_RED)
+    expect(card("Привод аудитории в тг бота"), REASON_RED)
+    expect(card("Настроить поток пользователей через рекламу тг-бота"), REASON_RED)
+    expect(card("Скопировать телеграм бота"), REASON_ACCEPT)
+    expect(card("Создание сложного телеграм бота"), REASON_ACCEPT)
+    expect(card("Разработка парсера для отдела кадров", "парсинг и деплой"), REASON_ACCEPT)
 
 
 def test_title_repeat_window() -> None:

@@ -192,6 +192,15 @@ RED_KEYWORDS: tuple[str, ...] = (
     "привлечь",
     "продюсирование",
     "лидогенерация",
+    "реклама",
+    "рекламу",
+    "рекламы",
+    "рекламе",
+    "реклам",
+    "поток пользователей",
+    "привод аудитории",
+    "stories",
+    "отметки",
 )
 
 GRAY_KEYWORDS: tuple[str, ...] = (
@@ -208,7 +217,7 @@ GRAY_KEYWORDS: tuple[str, ...] = (
     "за 2 дня",
 )
 
-BUDGET_DROP_RUB = 2000
+BUDGET_DROP_RUB = 5000
 GRAY_BUDGET_RUB = 3000
 MODULE_DROP_COUNT = 5
 MODULE_DROP_BUDGET_RUB = 10000
