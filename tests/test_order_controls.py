@@ -9,15 +9,17 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from bot.database import SeenStorage
 from bot.kwork_api import KworkTickResult, cards_from_payload, run_kwork_loop
+from bot.kwork_api import POLL_MAX_SECONDS, POLL_MIN_SECONDS, next_wait_seconds
 from bot.kwork_filter import (
     REASON_ACCEPT,
     REASON_BLACKLIST,
-    REASON_BUDGET,
-    REASON_LOW_SCORE,
-    REASON_PARK,
+    REASON_GRAY,
+    REASON_LOW,
+    REASON_NO_PROFILE,
     REASON_RED,
     decide_card,
 )
+from bot.config import GREEN_WEIGHTS
 from bot.models import OrderCard
 from bot.owner_commands import OwnerCommands, callback_key, order_keyboard, reason_keyboard
 from bot.run_control import RunControl
@@ -73,26 +75,29 @@ def test_username_comes_from_project_payload() -> None:
     assert cards[0].username == "Buyer"
 
 
-def test_score_two_is_parked_and_blacklist_wins_before_score() -> None:
-    parked = decide_card(_card("просто телеграм"), title_repeat=False)
-    assert parked.reason == REASON_PARK
-    assert parked.score == 2
-    blocked = decide_card(
-        _card("Python бот", username="Bad Buyer"),
-        title_repeat=False,
-        blacklist_patterns=("bad",),
-    )
-    assert blocked.reason == REASON_BLACKLIST
-    cheap = decide_card(_card("Python бот", price="7000"), title_repeat=False, budget_drop_rub=8000)
-    assert cheap.reason == REASON_BUDGET
-    penalized = decide_card(_card("Python бот"), title_repeat=False, score_penalty=3)
-    assert penalized.reason == REASON_PARK
-    assert penalized.score == 2
-    dropped = decide_card(_card("python api"), title_repeat=False, score_penalty=3)
-    assert dropped.reason == REASON_LOW_SCORE
-    assert dropped.score == 1
-    red = decide_card(_card("Python бот", description="битрикс"), title_repeat=False, extra_red=("битрикс",))
-    assert red.reason == REASON_RED
+def test_profile_words_and_zero_score_journal() -> None:
+    assert GREEN_WEIGHTS["агент"] == 3
+    assert GREEN_WEIGHTS["ии"] == 2
+    assert GREEN_WEIGHTS["gpt"] == 3
+    assert GREEN_WEIGHTS["chatgpt"] == 3
+    assert GREEN_WEIGHTS["нейросеть"] == 2
+    assert GREEN_WEIGHTS["парсер"] == 3
+    assert GREEN_WEIGHTS["парсинг"] == 3
+    assert GREEN_WEIGHTS["автоматизация"] == 2
+    for removed in ("pytest", "unittest", "тестирование", "ci/cd", "github actions", "systemd", "nginx", "оплата", "сервер", "vps"):
+        assert removed not in GREEN_WEIGHTS
+    zero = decide_card(_card("Дополненная реальность"), title_repeat=False)
+    assert zero.reason == REASON_NO_PROFILE
+    assert zero.accept is False
+    low = decide_card(_card("просто телеграм"), title_repeat=False)
+    assert low.reason == REASON_LOW
+    assert low.accept is True
+    assert low.score == 2
+    paid = decide_card(_card("Python бот", price="8000", description="нужно за 1 день"), title_repeat=False)
+    assert paid.reason == REASON_ACCEPT
+    neural = decide_card(_card("Нейросеть для текстов"), title_repeat=False)
+    assert neural.reason == REASON_LOW
+    assert neural.matched_red == ""
 
 
 def test_pause_skips_the_timer_and_run_now_still_counts(tmp_path: Path) -> None:
@@ -137,12 +142,9 @@ def test_pause_skips_the_timer_and_run_now_still_counts(tmp_path: Path) -> None:
     text, stats, calls = asyncio.run(_check())
     assert calls == []
     assert "найдено: 4" in text
-    assert "прошло фильтр: 1" in text
-    assert "новых: 1" in text
-    assert "на парковке: 1" in text
-    assert "blocked_by_title_score: 2" in stats
-    top = stats.split("Топ-3 причин:\n", 1)[1]
-    assert top.startswith("blocked_by_title_score: 2\nblocked_by_budget: 1\nparked: 1")
+    assert "дошло до владельца: 1" in text
+    assert "Kwork" in stats
+    assert "Почта" not in stats
     assert control.paused is True
     assert "возобновлены" in commands.resume()
 
@@ -224,10 +226,10 @@ def test_budget_suggestion_waits_for_accept(tmp_path: Path) -> None:
     applied = commands.handle_callback("sg:a:1", now=NOW)[0]
     assert applied == "Применено: порог бюджета 9000 ₽."
     assert decide_card(
-        _card("Python бот", price="8000"),
+        _card("Python бот", price="1500"),
         title_repeat=False,
         budget_drop_rub=storage.budget_override(),
-    ).reason == REASON_BUDGET
+    ).reason == REASON_GRAY
     assert refresh_suggestions(storage, now=NOW) == []
 
 
@@ -265,6 +267,77 @@ def test_declined_suggestion_stays_quiet_for_thirty_days(tmp_path: Path) -> None
     assert storage.budget_override() is None
 
 
+def test_interval_offers_rejections_and_separate_runs(tmp_path: Path) -> None:
+    import bot.kwork_api as kwork_api
+
+    original = kwork_api.random.randint
+    try:
+        kwork_api.random.randint = lambda start, end: start
+        assert next_wait_seconds()[0] == POLL_MIN_SECONDS == 300
+        kwork_api.random.randint = lambda start, end: end
+        assert next_wait_seconds()[0] == POLL_MAX_SECONDS == 900
+    finally:
+        kwork_api.random.randint = original
+    cards = cards_from_payload(
+        {
+            "success": True,
+            "response": [
+                {
+                    "id": 15,
+                    "title": "Бот",
+                    "description": "за 1 день",
+                    "price": 2500,
+                    "offers": 3,
+                    "date_confirm": int(NOW.timestamp()) - 7200,
+                    "username": "Buyer",
+                }
+            ],
+        }
+    )
+    from bot.notifier import render_order
+
+    text = render_order(cards[0], now=NOW)
+    assert "Откликов: 3" in text
+    assert "Возраст: 2 ч" in text
+    assert "Срок: 1 дн." in text
+    assert "2500" in text
+
+    storage = _storage(tmp_path)
+    commands = _commands(storage)
+    storage.remember_rejection(order_id="1", title="Дополненная реальность", reason="no_profile_match", now=NOW)
+    storage.remember_rejection(order_id="2", title="Отрисовка логотипа", reason="blocked_by_red_list", now=NOW)
+    report = commands.rejected_stats(now=NOW)
+    assert "нет слов профиля: 1" in report
+    assert "красный список: 1" in report
+    assert "Дополненная реальность" in report
+    storage.save_run(
+        started_at="2026-10-20T09:00:00+00:00",
+        source="kwork",
+        found=12,
+        passed=1,
+        new_sent=1,
+        parked=0,
+        auth_error="",
+        reasons={"blocked_by_red_list": 4, "no_profile_match": 7},
+    )
+    storage.save_run(
+        started_at="2026-10-20T09:01:00+00:00",
+        source="mail",
+        found=0,
+        passed=0,
+        new_sent=0,
+        parked=0,
+        auth_error="",
+        reasons={},
+    )
+    stats = commands.run_stats()
+    assert "Kwork" in stats
+    assert "найдено: 12" in stats
+    assert "отсеяно красным списком: 4" in stats
+    assert "Почта" in stats
+    assert "найдено: 0" in stats
+
+
 def test_three_junk_votes_penalize_the_same_customer(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
     commands = _commands(storage)
@@ -272,8 +345,7 @@ def test_three_junk_votes_penalize_the_same_customer(tmp_path: Path) -> None:
         card = _card("Python бот", external_id=str(index), user_id=9, username="same")
         key = _remember(storage, card)
         commands.handle_callback(f"fb:j:{key}", now=NOW)
-    assert commands.penalty_for(9, now=NOW) == 3
-    assert commands.penalty_for(10, now=NOW) == 0
+    assert commands.penalty_for(9, now=NOW) == 0
     decision = decide_card(_card("Python бот api", user_id=9), title_repeat=False, score_penalty=3)
     assert decision.reason == REASON_ACCEPT
-    assert decision.score == 3
+    assert decision.score == 6

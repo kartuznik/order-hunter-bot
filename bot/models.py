@@ -13,3 +13,5 @@ class OrderCard:
     price: str
     user_id: int | None = None
     username: str = ""
+    offers: int | None = None
+    date_confirm: int | None = None

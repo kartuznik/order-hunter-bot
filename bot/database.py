@@ -75,15 +75,22 @@ class SeenStorage:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS order_runs (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    source TEXT PRIMARY KEY,
                     started_at TEXT NOT NULL,
-                    source TEXT NOT NULL,
                     found INTEGER NOT NULL,
                     passed INTEGER NOT NULL,
                     new_sent INTEGER NOT NULL,
                     parked INTEGER NOT NULL,
                     auth_error TEXT NOT NULL DEFAULT '',
                     reasons_json TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS rejected_orders (
+                    order_id TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (order_id, reason)
                 );
 
                 CREATE TABLE IF NOT EXISTS order_snapshots (
@@ -149,6 +156,33 @@ class SeenStorage:
                 );
                 """
             )
+            run_columns = {row["name"] for row in conn.execute("PRAGMA table_info(order_runs)").fetchall()}
+            if "id" in run_columns:
+                conn.execute("ALTER TABLE order_runs RENAME TO order_runs_old")
+                conn.execute(
+                    """
+                    CREATE TABLE order_runs (
+                        source TEXT PRIMARY KEY,
+                        started_at TEXT NOT NULL,
+                        found INTEGER NOT NULL,
+                        passed INTEGER NOT NULL,
+                        new_sent INTEGER NOT NULL,
+                        parked INTEGER NOT NULL,
+                        auth_error TEXT NOT NULL DEFAULT '',
+                        reasons_json TEXT NOT NULL
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO order_runs (
+                        source, started_at, found, passed, new_sent, parked, auth_error, reasons_json
+                    )
+                    SELECT source, started_at, found, passed, new_sent, parked, auth_error, reasons_json
+                    FROM order_runs_old
+                    """
+                )
+                conn.execute("DROP TABLE order_runs_old")
             conn.commit()
 
     def is_seen(self, source: str, external_id: str) -> bool:
@@ -315,12 +349,11 @@ class SeenStorage:
             conn.execute(
                 """
                 INSERT INTO order_runs (
-                    id, started_at, source, found, passed, new_sent, parked, auth_error, reasons_json
+                    source, started_at, found, passed, new_sent, parked, auth_error, reasons_json
                 )
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source) DO UPDATE SET
                     started_at = excluded.started_at,
-                    source = excluded.source,
                     found = excluded.found,
                     passed = excluded.passed,
                     new_sent = excluded.new_sent,
@@ -328,18 +361,65 @@ class SeenStorage:
                     auth_error = excluded.auth_error,
                     reasons_json = excluded.reasons_json
                 """,
-                (started_at, source, found, passed, new_sent, parked, auth_error, payload),
+                (source, started_at, found, passed, new_sent, parked, auth_error, payload),
             )
             conn.commit()
 
-    def last_run(self) -> dict | None:
+    def runs(self) -> list[dict]:
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM order_runs WHERE id = 1").fetchone()
-        if row is None:
-            return None
-        result = dict(row)
-        result["reasons"] = json.loads(result.pop("reasons_json"))
+            rows = conn.execute("SELECT * FROM order_runs ORDER BY source").fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["reasons"] = json.loads(item.pop("reasons_json"))
+            result.append(item)
         return result
+
+    def remember_rejection(self, *, order_id: str, title: str, reason: str, now: datetime) -> None:
+        current = now.astimezone(UTC)
+        stamp = current.isoformat(timespec="seconds")
+        cutoff = (current - timedelta(days=30)).isoformat(timespec="seconds")
+        with self._connect() as conn:
+            conn.execute("DELETE FROM rejected_orders WHERE created_at < ?", (cutoff,))
+            conn.execute(
+                """
+                INSERT INTO rejected_orders (order_id, reason, title, created_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(order_id, reason) DO UPDATE SET
+                    title = excluded.title
+                """,
+                (order_id, reason, title, stamp),
+            )
+            conn.commit()
+
+    def rejection_report(self, now: datetime) -> dict:
+        current = now.astimezone(UTC)
+        cutoff = (current - timedelta(days=30)).isoformat(timespec="seconds")
+        with self._connect() as conn:
+            conn.execute("DELETE FROM rejected_orders WHERE created_at < ?", (cutoff,))
+            conn.commit()
+            counts = conn.execute(
+                """
+                SELECT reason, COUNT(*) AS total
+                FROM rejected_orders
+                WHERE created_at >= ?
+                GROUP BY reason
+                """,
+                (cutoff,),
+            ).fetchall()
+            samples = conn.execute(
+                """
+                SELECT title FROM rejected_orders
+                WHERE reason = 'no_profile_match' AND created_at >= ?
+                ORDER BY created_at DESC
+                LIMIT 15
+                """,
+                (cutoff,),
+            ).fetchall()
+        return {
+            "counts": {str(row["reason"]): int(row["total"]) for row in counts},
+            "no_profile_titles": [str(row["title"]) for row in samples],
+        }
 
     def save_snapshot(
         self,
