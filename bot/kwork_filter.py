@@ -29,8 +29,12 @@ REASON_DEADLINE = "blocked_by_deadline"
 REASON_MODULES = "blocked_by_modules"
 REASON_TITLE = "blocked_by_title_repeat"
 REASON_TITLE_SCORE = "blocked_by_title_score"
+REASON_BLACKLIST = "blocked_by_blacklist"
+REASON_PARK = "parked"
 REASON_ACCEPT = "accept"
 REASON_GRAY = "gray"
+PARK_SCORE = 2
+JUNK_SCORE_PENALTY = 3
 
 _TOKEN_RE = re.compile(r"(?<!\w)[\w]+(?!\w)")
 _RU_ENDINGS = (
@@ -105,7 +109,48 @@ def parse_budget_rub(price: str) -> int | None:
     return int(match.group(0))
 
 
-def decide_card(card: OrderCard, *, title_repeat: bool) -> FilterDecision:
+def username_blocked(username: str, patterns: tuple[str, ...]) -> str | None:
+    haystack = username.casefold()
+    if not haystack:
+        return None
+    for pattern in patterns:
+        needle = pattern.strip().casefold()
+        if needle and needle in haystack:
+            return pattern
+    return None
+
+
+def content_stems(text: str) -> set[str]:
+    return {_stem_token(token) for token in _TOKEN_RE.findall(_normalize(text))}
+
+
+def green_stems() -> frozenset[str]:
+    stems: set[str] = set()
+    for term in GREEN_WEIGHTS:
+        stems.update(content_stems(term))
+    return frozenset(stems)
+
+
+def red_stems() -> frozenset[str]:
+    stems: set[str] = set()
+    for term in RED_KEYWORDS:
+        stems.update(content_stems(term))
+    return frozenset(stems)
+
+
+def decide_card(
+    card: OrderCard,
+    *,
+    title_repeat: bool,
+    blacklist_patterns: tuple[str, ...] = (),
+    score_penalty: int = 0,
+    extra_red: tuple[str, ...] = (),
+    budget_drop_rub: int | None = None,
+) -> FilterDecision:
+    blocked = username_blocked(card.username, blacklist_patterns)
+    if blocked is not None:
+        return FilterDecision(False, REASON_BLACKLIST, matched_red=blocked)
+
     title_hits = _green_hits(card.title, "")
     title_score = sum(weight for _, weight in title_hits)
     if title_score < TITLE_SCORE_MIN:
@@ -120,7 +165,8 @@ def decide_card(card: OrderCard, *, title_repeat: bool) -> FilterDecision:
     hits = _green_hits(card.title, card.description)
     score = sum(weight for _, weight in hits)
     matched_green = ", ".join(term for term, _ in hits)
-    matched_red = _matched_red(text)
+    matched_red = _matched_red(text, extra_red)
+    score = max(0, score - max(0, score_penalty))
 
     def decision(accept: bool, reason: str, *, gray: bool = False, red: str = "") -> FilterDecision:
         return FilterDecision(
@@ -135,10 +181,13 @@ def decide_card(card: OrderCard, *, title_repeat: bool) -> FilterDecision:
     if matched_red is not None:
         return decision(False, REASON_RED, red=matched_red)
     if score < GREEN_SCORE_THRESHOLD:
+        if score == PARK_SCORE:
+            return decision(False, REASON_PARK)
         return decision(False, REASON_LOW_SCORE)
 
     budget = parse_budget_rub(card.price)
-    if budget is not None and budget < BUDGET_DROP_RUB:
+    floor = BUDGET_DROP_RUB if budget_drop_rub is None else budget_drop_rub
+    if budget is not None and budget < floor:
         return decision(False, REASON_BUDGET)
     deadline_days = _deadline_days(text)
     if deadline_days is not None and deadline_days < DEADLINE_DROP_DAYS:
@@ -204,9 +253,9 @@ def _weight_term_matches(text: str, stems: list[str], term: str) -> bool:
     return any(stems[index : index + width] == wanted for index in range(len(stems) - width + 1))
 
 
-def _matched_red(text: str) -> str | None:
+def _matched_red(text: str, extra: tuple[str, ...] = ()) -> str | None:
     stems = [_stem_token(token) for token in _TOKEN_RE.findall(text)]
-    for term in RED_KEYWORDS:
+    for term in extra + RED_KEYWORDS:
         if _weight_term_matches(text, stems, term):
             return term
     if _has(text, "нейросеть") and _BOT_RE.search(text) is None:
