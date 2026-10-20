@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from bot.config import TITLE_REPEAT_DAYS, get_settings
 from bot.database import SeenStorage
 from bot.kwork_api import run_kwork_loop
+from bot.kwork_token import WARN_INTERVAL, maybe_warn_token_expiry
 from bot.kwork_filter import GRAY_TITLE_PREFIX, decide_card, title_hash
 from bot.kwork_html import fetch_kwork_orders
 from bot.kwork_imap import fetch_kwork_orders_from_imap
@@ -127,6 +128,31 @@ async def _process_poll(storage: SeenStorage, notifier: Notifier) -> dict[str, i
     return await _accept_cards(storage, notifier, cards)
 
 
+async def run_token_expiry_loop(
+    *,
+    storage: SeenStorage,
+    notifier: Notifier,
+    stop_event: asyncio.Event,
+) -> None:
+    while not stop_event.is_set():
+        settings = get_settings()
+        try:
+            await maybe_warn_token_expiry(
+                storage,
+                notifier,
+                token=settings.kwork_token,
+                updated_raw=settings.KWORK_TOKEN_UPDATED_AT,
+                warn_days=settings.KWORK_TOKEN_WARN_DAYS,
+                now=datetime.now(tz=UTC),
+            )
+        except Exception as error:
+            logger.error("Kwork token expiry check failed: %s", type(error).__name__)
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=WARN_INTERVAL.total_seconds())
+        except asyncio.TimeoutError:
+            continue
+
+
 async def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -162,6 +188,9 @@ async def main() -> None:
             stop_event=stop_event,
             accept_cards=_accept_kwork,
         )
+    )
+    token_task = asyncio.create_task(
+        run_token_expiry_loop(storage=storage, notifier=notifier, stop_event=stop_event)
     )
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -201,10 +230,13 @@ async def main() -> None:
         stop_event.set()
         stats_task.cancel()
         kwork_task.cancel()
+        token_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await stats_task
         with contextlib.suppress(asyncio.CancelledError):
             await kwork_task
+        with contextlib.suppress(asyncio.CancelledError):
+            await token_task
         await notifier.close()
 
 

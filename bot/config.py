@@ -244,6 +244,8 @@ class Settings(BaseSettings):
     ENABLE_KWORK: bool = Field(default=False)
     KWORK_PROJECTS_URL: str = Field(default="https://kwork.ru/projects")
     KWORK_TOKEN: str = Field(default="")
+    KWORK_TOKEN_UPDATED_AT: str = Field(default="")
+    KWORK_TOKEN_WARN_DAYS: int = Field(default=7)
 
     CORE_KEYWORDS: str = Field(default=DEFAULT_CORE_KEYWORDS)
     SECONDARY_KEYWORDS: str = Field(default=DEFAULT_SECONDARY_KEYWORDS)
@@ -278,6 +280,11 @@ class Settings(BaseSettings):
     @classmethod
     def clamp_poll_interval(cls, value: int) -> int:
         return max(180, int(value))
+
+    @field_validator("KWORK_TOKEN_WARN_DAYS")
+    @classmethod
+    def clamp_token_warn_days(cls, value: int) -> int:
+        return max(1, int(value))
 
     @property
     def db_file(self) -> Path:
