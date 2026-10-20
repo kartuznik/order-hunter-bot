@@ -5,17 +5,19 @@ import contextlib
 import logging
 import signal
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from bot.config import TITLE_REPEAT_DAYS, get_settings
 from bot.database import SeenStorage
-from bot.kwork_api import run_kwork_loop
+from bot.kwork_api import _kwork_tick, run_kwork_loop
 from bot.kwork_token import WARN_INTERVAL, maybe_warn_token_expiry
-from bot.kwork_filter import GRAY_TITLE_PREFIX, decide_card, title_hash
+from bot.kwork_filter import GRAY_TITLE_PREFIX, REASON_PARK, decide_card, title_hash
 from bot.kwork_html import fetch_kwork_orders
 from bot.kwork_imap import fetch_kwork_orders_from_imap
 from bot.models import OrderCard
 from bot.notifier import Notifier
+from bot.owner_commands import OwnerCommands, callback_key
+from bot.run_control import RunControl
 from bot.stats_listener import run_stats_listener
 
 logger = logging.getLogger("order_hunter")
@@ -41,13 +43,44 @@ async def _accept_cards(
     blocked_by_negative = 0
     rejected_by_and_logic = 0
     sent_notifications = 0
+    parked = 0
+    reasons: dict[str, int] = {}
+    now = datetime.now(tz=UTC)
+    since = (now - timedelta(days=30)).isoformat(timespec="seconds")
+    penalized = storage.penalized_user_ids(since, 3)
+    blacklist = storage.blacklist_needles()
+    extra_red = storage.dynamic_red_words()
+    budget_drop = storage.budget_override()
 
     for card in cards:
         seen_total += 1
         decision = decide_card(
             card,
             title_repeat=storage.title_seen_within(title_hash(card.title), TITLE_REPEAT_DAYS),
+            blacklist_patterns=blacklist,
+            score_penalty=3 if card.user_id in penalized else 0,
+            extra_red=extra_red,
+            budget_drop_rub=budget_drop,
         )
+        reasons[decision.reason] = reasons.get(decision.reason, 0) + 1
+        if decision.reason == REASON_PARK:
+            storage.park_order(
+                order_id=card.external_id,
+                title=card.title,
+                price=card.price,
+                score=decision.score,
+                now=now,
+                days=7,
+            )
+            parked += 1
+            rejected_by_and_logic += 1
+            logger.info(
+                "Kwork filter id=%s reason=%s score=%s",
+                card.external_id,
+                decision.reason,
+                decision.score,
+            )
+            continue
         if not decision.accept:
             if settings.DEBUG_FILTER_LOGS and decision.matched_red:
                 logger.info(
@@ -90,6 +123,17 @@ async def _accept_cards(
         )
         if storage.is_seen(card.source, card.external_id):
             continue
+        storage.save_snapshot(
+            callback_key=callback_key(card.external_id),
+            external_id=card.external_id,
+            source=card.source,
+            title=card.title,
+            description=card.description,
+            link=card.link,
+            price=card.price,
+            user_id=card.user_id,
+            username=card.username,
+        )
         outgoing = card
         if decision.gray:
             outgoing = replace(card, title=f"{GRAY_TITLE_PREFIX}{card.title}")
@@ -120,6 +164,8 @@ async def _accept_cards(
         "blocked_by_negative": blocked_by_negative,
         "rejected_by_and_logic": rejected_by_and_logic,
         "sent_notifications": sent_notifications,
+        "parked": parked,
+        "reasons": reasons,
     }
 
 
@@ -174,19 +220,32 @@ async def main() -> None:
     await notifier.send_startup_test()
 
     stop_event = asyncio.Event()
+    run_control = RunControl()
+
+    async def _accept_kwork(cards: list[OrderCard]) -> dict[str, int]:
+        return await _accept_cards(storage, notifier, cards)
+
+    async def _run_kwork():
+        return await _kwork_tick(storage=storage, notifier=notifier, accept_cards=_accept_kwork)
+
+    commands = OwnerCommands(storage, run_control, _run_kwork)
     stats_task = asyncio.create_task(
-        run_stats_listener(settings=settings, storage=storage, stop_event=stop_event)
+        run_stats_listener(
+            settings=settings,
+            storage=storage,
+            commands=commands,
+            stop_event=stop_event,
+        )
     )
 
-    async def _accept_kwork(cards: list[OrderCard]) -> None:
-        await _accept_cards(storage, notifier, cards)
+    async def _run_scheduled_kwork() -> None:
+        await commands.run_now()
 
     kwork_task = asyncio.create_task(
         run_kwork_loop(
-            storage=storage,
-            notifier=notifier,
             stop_event=stop_event,
-            accept_cards=_accept_kwork,
+            run_once=_run_scheduled_kwork,
+            should_pause=lambda: run_control.paused,
         )
     )
     token_task = asyncio.create_task(
@@ -200,25 +259,30 @@ async def main() -> None:
     try:
         while not stop_event.is_set():
             try:
-                metrics = await _process_poll(storage=storage, notifier=notifier)
-                total = storage.read_stats()
-                runtime_minutes = int((datetime.now(tz=UTC) - started_at).total_seconds() // 60)
-                logger.info(
-                    "Poll complete: seen_total=%s passed_filter=%s blocked_by_negative=%s "
-                    "rejected_by_and_logic=%s sent_notifications=%s totals_seen=%s totals_passed=%s "
-                    "totals_blocked=%s totals_rejected_and=%s totals_notified=%s runtime_minutes=%s",
-                    metrics["seen_total"],
-                    metrics["passed_filter"],
-                    metrics["blocked_by_negative"],
-                    metrics["rejected_by_and_logic"],
-                    metrics["sent_notifications"],
-                    total["total_seen"],
-                    total["total_filtered"],
-                    total["total_blocked_negative"],
-                    total["total_rejected_and"],
-                    total["total_notified"],
-                    runtime_minutes,
-                )
+                if run_control.paused:
+                    logger.info("Mail poll skipped: paused")
+                else:
+                    async with run_control.lock:
+                        metrics = await _process_poll(storage=storage, notifier=notifier)
+                        commands.record_mail(metrics)
+                    total = storage.read_stats()
+                    runtime_minutes = int((datetime.now(tz=UTC) - started_at).total_seconds() // 60)
+                    logger.info(
+                        "Poll complete: seen_total=%s passed_filter=%s blocked_by_negative=%s "
+                        "rejected_by_and_logic=%s sent_notifications=%s totals_seen=%s totals_passed=%s "
+                        "totals_blocked=%s totals_rejected_and=%s totals_notified=%s runtime_minutes=%s",
+                        metrics["seen_total"],
+                        metrics["passed_filter"],
+                        metrics["blocked_by_negative"],
+                        metrics["rejected_by_and_logic"],
+                        metrics["sent_notifications"],
+                        total["total_seen"],
+                        total["total_filtered"],
+                        total["total_blocked_negative"],
+                        total["total_rejected_and"],
+                        total["total_notified"],
+                        runtime_minutes,
+                    )
             except Exception as error:
                 logger.exception("Poll cycle failed: %s", error)
 

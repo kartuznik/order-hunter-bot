@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import random
+from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
@@ -34,6 +35,13 @@ SHAPE_PROBLEM = "Kwork /projects вернул неожиданную форму 
 NOTICE_MISSING = "missing_token"
 NOTICE_AUTH = "projects_auth"
 NOTICE_SHAPE = "projects_shape"
+
+
+@dataclass(slots=True)
+class KworkTickResult:
+    found: int = 0
+    auth_error: str = ""
+    metrics: dict[str, Any] | None = None
 
 
 class KworkRejected(Exception):
@@ -67,6 +75,8 @@ def cards_from_payload(payload: dict[str, Any]) -> list[OrderCard]:
         price = item.get("price")
         user_raw = item.get("user_id")
         user_id = user_raw if isinstance(user_raw, int) and not isinstance(user_raw, bool) else None
+        username_raw = item.get("username")
+        username = username_raw.strip() if isinstance(username_raw, str) else ""
         cards.append(
             OrderCard(
                 source="kwork_api",
@@ -76,6 +86,7 @@ def cards_from_payload(payload: dict[str, Any]) -> list[OrderCard]:
                 description=str(item.get("description") or ""),
                 price=str(price) if isinstance(price, int) and not isinstance(price, bool) else "-",
                 user_id=user_id,
+                username=username,
             )
         )
     return cards
@@ -140,17 +151,20 @@ async def _alert_once(storage: SeenStorage, notifier: Notifier, key: str, text: 
 
 async def run_kwork_loop(
     *,
-    storage: SeenStorage,
-    notifier: Notifier,
     stop_event: asyncio.Event,
-    accept_cards,
+    run_once,
+    should_pause,
+    wait_seconds=next_wait_seconds,
 ) -> None:
     while not stop_event.is_set():
-        try:
-            await _kwork_tick(storage=storage, notifier=notifier, accept_cards=accept_cards)
-        except Exception as error:
-            logger.error("Kwork tick failed: %s", type(error).__name__)
-        delay, jitter = next_wait_seconds()
+        if should_pause():
+            logger.info("Kwork poll skipped: paused")
+        else:
+            try:
+                await run_once()
+            except Exception as error:
+                logger.error("Kwork tick failed: %s", type(error).__name__)
+        delay, jitter = wait_seconds()
         logger.info("Kwork next poll base=%s jitter=%s sleep=%s", POLL_BASE_SECONDS, jitter, delay)
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=delay)
@@ -158,14 +172,14 @@ async def run_kwork_loop(
             continue
 
 
-async def _kwork_tick(*, storage: SeenStorage, notifier: Notifier, accept_cards) -> None:
+async def _kwork_tick(*, storage: SeenStorage, notifier: Notifier, accept_cards) -> KworkTickResult:
     settings = get_settings()
     token = settings.kwork_token
     if not token:
         if storage.get_notice(NOTICE_MISSING) != "sent":
             logger.error(MISSING_TOKEN_HINT)
         await _alert_once(storage, notifier, NOTICE_MISSING, MISSING_TOKEN_HINT)
-        return
+        return KworkTickResult(auth_error="missing")
     storage.clear_notice(NOTICE_MISSING)
 
     try:
@@ -176,8 +190,9 @@ async def _kwork_tick(*, storage: SeenStorage, notifier: Notifier, accept_cards)
             await _alert_once(storage, notifier, NOTICE_AUTH, TOKEN_STALE)
         elif error.kind == "shape":
             await _alert_once(storage, notifier, NOTICE_SHAPE, SHAPE_PROBLEM)
-        return
+        return KworkTickResult(auth_error=error.kind)
     storage.clear_notice(NOTICE_AUTH)
     storage.clear_notice(NOTICE_SHAPE)
     logger.info("Kwork poll complete cards=%s", len(cards))
-    await accept_cards(cards)
+    metrics = await accept_cards(cards)
+    return KworkTickResult(found=len(cards), metrics=metrics)

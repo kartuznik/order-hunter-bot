@@ -16,7 +16,7 @@ from bot.kwork_filter import (
     REASON_BUDGET,
     REASON_DEADLINE,
     REASON_GRAY,
-    REASON_LOW_SCORE,
+    REASON_PARK,
     REASON_MODULES,
     REASON_RED,
     REASON_TITLE,
@@ -97,12 +97,12 @@ def test_owner_inflected_title_reaches_threshold() -> None:
 
 
 def test_low_score_is_rejected() -> None:
-    expect(card("просто телеграм"), REASON_LOW_SCORE)
-    expect(card("api интеграция"), REASON_LOW_SCORE)
-    expect(card("github actions deploy"), REASON_LOW_SCORE)
+    expect(card("просто телеграм"), REASON_PARK)
+    expect(card("api интеграция"), REASON_PARK)
+    expect(card("github actions deploy"), REASON_PARK)
     expect(card("Нарисовать баннер", "для кафе"), REASON_TITLE_SCORE)
     expect(card("Починить email", "нужен парсер"), REASON_TITLE_SCORE)
-    expect(card("Только claude", "без стека"), REASON_LOW_SCORE)
+    expect(card("Только claude", "без стека"), REASON_PARK)
 
 
 def test_red_still_wins() -> None:
@@ -147,7 +147,7 @@ def test_user_id_from_payload() -> None:
 def test_telegram_family_is_counted_once() -> None:
     title = "Создать тг канал мах и телега новости"
     assert calculate_green_score(title, "") <= 2
-    expect(card(title), REASON_LOW_SCORE)
+    expect(card(title), REASON_PARK)
 
 
 def test_video_mobile_and_mini_app_are_red() -> None:

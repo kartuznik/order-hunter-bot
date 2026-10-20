@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 
 from aiogram import Bot
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.config import Settings
 from bot.models import OrderCard
+from bot.owner_commands import order_keyboard
 
 logger = logging.getLogger("order_hunter.notifier")
 
@@ -43,9 +43,7 @@ class Notifier:
             logger.info("[DRY-RUN] %s", text)
             return False
 
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Открыть заказ", url=card.link)]]
-        )
+        keyboard = order_keyboard(card)
         for chat_id in self._settings.notify_chat_ids:
             await self._bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
         return True

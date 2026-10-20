@@ -12,3 +12,4 @@ class OrderCard:
     description: str
     price: str
     user_id: int | None = None
+    username: str = ""
