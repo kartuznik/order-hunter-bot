@@ -21,9 +21,8 @@ logger = logging.getLogger("order_hunter.kwork_api")
 API_PROJECTS = "https://api.kwork.ru/projects"
 USER_AGENT = "kwork-parser/0.1"
 MAX_BYTES = 2 * 1024 * 1024
-POLL_BASE_SECONDS = 300
-JITTER_MIN_SECONDS = 30
-JITTER_MAX_SECONDS = 90
+POLL_MIN_SECONDS = 300
+POLL_MAX_SECONDS = 900
 MISSING_TOKEN_HINT = (
     "Нет Kwork-токена. Обнови его командой signIn с домашней машины, это займёт две минуты."
 )
@@ -55,8 +54,8 @@ def project_link(project_id: int) -> str:
 
 
 def next_wait_seconds() -> tuple[int, int]:
-    jitter = random.randint(JITTER_MIN_SECONDS, JITTER_MAX_SECONDS)
-    return POLL_BASE_SECONDS + jitter, jitter
+    delay = random.randint(POLL_MIN_SECONDS, POLL_MAX_SECONDS)
+    return delay, delay - POLL_MIN_SECONDS
 
 
 def cards_from_payload(payload: dict[str, Any]) -> list[OrderCard]:
@@ -77,6 +76,10 @@ def cards_from_payload(payload: dict[str, Any]) -> list[OrderCard]:
         user_id = user_raw if isinstance(user_raw, int) and not isinstance(user_raw, bool) else None
         username_raw = item.get("username")
         username = username_raw.strip() if isinstance(username_raw, str) else ""
+        offers_raw = item.get("offers")
+        offers = offers_raw if isinstance(offers_raw, int) and not isinstance(offers_raw, bool) else None
+        confirmed_raw = item.get("date_confirm")
+        date_confirm = confirmed_raw if isinstance(confirmed_raw, int) and not isinstance(confirmed_raw, bool) else None
         cards.append(
             OrderCard(
                 source="kwork_api",
@@ -87,6 +90,8 @@ def cards_from_payload(payload: dict[str, Any]) -> list[OrderCard]:
                 price=str(price) if isinstance(price, int) and not isinstance(price, bool) else "-",
                 user_id=user_id,
                 username=username,
+                offers=offers,
+                date_confirm=date_confirm,
             )
         )
     return cards
@@ -164,8 +169,13 @@ async def run_kwork_loop(
                 await run_once()
             except Exception as error:
                 logger.error("Kwork tick failed: %s", type(error).__name__)
-        delay, jitter = wait_seconds()
-        logger.info("Kwork next poll base=%s jitter=%s sleep=%s", POLL_BASE_SECONDS, jitter, delay)
+        delay, _jitter = wait_seconds()
+        logger.info(
+            "Kwork next poll sleep=%s range=%s-%s",
+            delay,
+            POLL_MIN_SECONDS,
+            POLL_MAX_SECONDS,
+        )
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=delay)
         except asyncio.TimeoutError:

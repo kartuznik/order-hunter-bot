@@ -117,6 +117,8 @@ async def _command_text(
         return commands.parked()
     if name == "/parked_clear":
         return commands.parked_clear()
+    if name == "/rejected_stats":
+        return commands.rejected_stats()
     return ""
 
 

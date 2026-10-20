@@ -13,14 +13,10 @@ from bot.kwork_api import cards_from_payload
 from bot.kwork_filter import (
     _matched_red,
     REASON_ACCEPT,
-    REASON_BUDGET,
-    REASON_DEADLINE,
     REASON_GRAY,
-    REASON_PARK,
-    REASON_MODULES,
+    REASON_LOW,
+    REASON_NO_PROFILE,
     REASON_RED,
-    REASON_TITLE,
-    REASON_TITLE_SCORE,
     calculate_green_score,
     decide_card,
     title_hash,
@@ -42,13 +38,13 @@ def card(title: str, description: str = "", price: str = "5000") -> OrderCard:
 def expect(order: OrderCard, reason: str, *, repeat: bool = False, gray: bool = False) -> None:
     decision = decide_card(order, title_repeat=repeat)
     assert decision.reason == reason, (decision.reason, reason, order.title)
-    assert decision.accept is (reason in {REASON_ACCEPT, REASON_GRAY})
+    assert decision.accept is (reason in {REASON_ACCEPT, REASON_GRAY, REASON_LOW})
     assert decision.gray is gray
 
 
 def test_green_scores() -> None:
     assert calculate_green_score("телеграм бот", "") == 4
-    assert calculate_green_score("парсер python", "") == 5
+    assert calculate_green_score("парсер python", "") == 6
     assert calculate_green_score("django сайт", "") == 3
     assert calculate_green_score("просто телеграм", "") == 2
     assert calculate_green_score("api интеграция", "") == 2
@@ -56,8 +52,8 @@ def test_green_scores() -> None:
     assert calculate_green_score("telegram bot", "") == 4
     assert calculate_green_score("ai llm python", "") == 9
     assert calculate_green_score("openai интеграция", "") == 3
-    assert calculate_green_score("scraping парсер", "") == 4
-    assert calculate_green_score("github actions deploy", "") == 2
+    assert calculate_green_score("scraping парсер", "") == 5
+    assert calculate_green_score("github actions deploy", "") == 1
 
 
 def test_cyrillic_inflections_keep_dictionary_weight() -> None:
@@ -66,10 +62,10 @@ def test_cyrillic_inflections_keep_dictionary_weight() -> None:
     assert calculate_green_score("Юкассе", "") == 1
     assert calculate_green_score("интеграции", "") == calculate_green_score("интеграция", "") == 1
     assert calculate_green_score("интеграцию", "") == 1
-    assert calculate_green_score("парсеров", "") == calculate_green_score("парсер", "") == 2
-    assert calculate_green_score("парсинга", "") == calculate_green_score("парсинг", "") == 2
+    assert calculate_green_score("парсеров", "") == calculate_green_score("парсер", "") == 3
+    assert calculate_green_score("парсинга", "") == calculate_green_score("парсинг", "") == 3
     assert calculate_green_score("бота", "") == calculate_green_score("бот", "") == 2
-    assert calculate_green_score("сервера", "") == calculate_green_score("сервер", "") == 1
+    assert calculate_green_score("сервера", "") == calculate_green_score("сервер", "") == 0
 
 
 def test_stemmer_does_not_match_latin_substrings() -> None:
@@ -77,9 +73,9 @@ def test_stemmer_does_not_match_latin_substrings() -> None:
     assert calculate_green_score("robot", "") == 0
     assert calculate_green_score("makeup", "") == 0
     assert calculate_green_score("fastapi", "") == 3
-    assert calculate_green_score("chatgpt", "") == 2
-    expect(card("Рассылка email"), REASON_TITLE_SCORE)
-    expect(card("Makeup для визитки"), REASON_TITLE_SCORE)
+    assert calculate_green_score("chatgpt", "") == 3
+    expect(card("Рассылка email"), REASON_NO_PROFILE)
+    expect(card("Makeup для визитки"), REASON_NO_PROFILE)
 
 
 def test_email_does_not_match_red_ml() -> None:
@@ -97,37 +93,37 @@ def test_owner_inflected_title_reaches_threshold() -> None:
 
 
 def test_low_score_is_rejected() -> None:
-    expect(card("просто телеграм"), REASON_PARK)
-    expect(card("api интеграция"), REASON_PARK)
-    expect(card("github actions deploy"), REASON_PARK)
-    expect(card("Нарисовать баннер", "для кафе"), REASON_TITLE_SCORE)
-    expect(card("Починить email", "нужен парсер"), REASON_TITLE_SCORE)
-    expect(card("Только claude", "без стека"), REASON_PARK)
+    expect(card("просто телеграм"), REASON_LOW)
+    expect(card("api интеграция"), REASON_LOW)
+    expect(card("github actions deploy"), REASON_LOW)
+    expect(card("Нарисовать баннер", "для кафе"), REASON_NO_PROFILE)
+    expect(card("Починить email", "нужен парсер"), REASON_ACCEPT)
+    expect(card("Только claude", "без стека"), REASON_LOW)
 
 
 def test_red_still_wins() -> None:
-    expect(card("Сайт на react", "и python"), REASON_TITLE_SCORE)
+    expect(card("Сайт на react", "и python"), REASON_RED)
     expect(card("Бот на n8n", "и python api"), REASON_RED)
-    expect(card("Нейросеть для текстов", "python"), REASON_TITLE_SCORE)
+    expect(card("Нейросеть для текстов", "python"), REASON_ACCEPT)
     expect(card("Python, москва", "только этот город"), REASON_RED)
     expect(card("Нужен middle+ python", "в команду"), REASON_RED)
 
 
 def test_score_then_budget_deadline_modules_and_gray() -> None:
-    expect(card("Makeup лендинг", "python скрипт"), REASON_TITLE_SCORE)
-    expect(card("Python бот", price="1500"), REASON_BUDGET)
-    expect(card("Python бот", price="4999"), REASON_BUDGET)
+    expect(card("Makeup лендинг", "python скрипт"), REASON_ACCEPT)
+    expect(card("Python бот", price="1500"), REASON_GRAY, gray=True)
+    expect(card("Python бот", price="4999"), REASON_ACCEPT)
     expect(card("Python бот", price="5000"), REASON_ACCEPT)
-    expect(card("Python бот", "нужно за 1 день"), REASON_DEADLINE)
+    expect(card("Python бот", "нужно за 1 день"), REASON_ACCEPT)
     expect(card("Python бот", "успеть за 2 дня"), REASON_GRAY, gray=True)
-    expect(card("Python сервис", "6 модулей в личном кабинете", price="8000"), REASON_MODULES)
+    expect(card("Python сервис", "6 модулей в личном кабинете", price="8000"), REASON_ACCEPT)
     expect(card("Python сервис", "6 модулей", price="15000"), REASON_ACCEPT)
     expect(card("Python сервис", "4 модуля", price="-"), REASON_GRAY, gray=True)
-    expect(card("Нейросеть", "telegram bot на python"), REASON_TITLE_SCORE)
+    expect(card("Нейросеть", "telegram bot на python"), REASON_ACCEPT)
     expect(card("Python", "москва, формат remote"), REASON_ACCEPT)
     expect(card("Claude помощник", "на python"), REASON_GRAY, gray=True)
-    expect(card("Python интеграция", "обычная задача"), REASON_TITLE, repeat=True)
-    expect(card("CI/CD для сервиса", "github actions и python"), REASON_TITLE_SCORE)
+    expect(card("Python интеграция", "обычная задача"), REASON_ACCEPT, repeat=True)
+    expect(card("CI/CD для сервиса", "github actions и python"), REASON_ACCEPT)
 
 
 def test_user_id_from_payload() -> None:
@@ -147,19 +143,19 @@ def test_user_id_from_payload() -> None:
 def test_telegram_family_is_counted_once() -> None:
     title = "Создать тг канал мах и телега новости"
     assert calculate_green_score(title, "") <= 2
-    expect(card(title), REASON_PARK)
+    expect(card(title), REASON_LOW)
 
 
 def test_video_mobile_and_mini_app_are_red() -> None:
     mini = card("Доработка Mini Apps")
     mobile = card("Разработка мобильного приложения")
     montage = card("Монтаж YouTube роликов + AI сцены")
-    expect(mini, REASON_TITLE_SCORE)
-    expect(mobile, REASON_TITLE_SCORE)
+    expect(mini, REASON_RED)
+    expect(mobile, REASON_RED)
     expect(montage, REASON_RED)
     assert decide_card(montage, title_repeat=False).matched_red == "монтаж"
     expect(card("Python монтаж роликов"), REASON_RED)
-    expect(card("Сделать мобильного приложения на заказ"), REASON_TITLE_SCORE)
+    expect(card("Сделать мобильного приложения на заказ"), REASON_RED)
 
 
 def test_relevant_bot_and_ai_check_still_pass() -> None:
@@ -177,7 +173,7 @@ def test_rental_and_cyrillic_smm_descriptions_are_red() -> None:
         "VPS/VDS не подходят. оплата сразу за весь период.",
     )
     rental_decision = decide_card(rental, title_repeat=False)
-    assert rental_decision.reason == REASON_TITLE_SCORE
+    assert rental_decision.reason == REASON_RED
     rental_with_core = decide_card(card("Python аренда сервера"), title_repeat=False)
     assert rental_with_core.reason == REASON_RED
     assert rental_with_core.matched_red == "аренда"
@@ -187,7 +183,7 @@ def test_rental_and_cyrillic_smm_descriptions_are_red() -> None:
         "нужно вести тг, ок, вк. оплата 10000/мес.",
     )
     smm_decision = decide_card(smm, title_repeat=False)
-    assert smm_decision.reason == REASON_TITLE_SCORE
+    assert smm_decision.reason == REASON_RED
     smm_with_core = decide_card(card("Python раскрутка смм"), title_repeat=False)
     assert smm_with_core.reason == REASON_RED
     assert smm_with_core.matched_red == "смм"
@@ -198,16 +194,16 @@ def test_python_bot_with_payment_still_passes() -> None:
     decision = decide_card(order, title_repeat=False)
     assert decision.reason == REASON_ACCEPT
     assert decision.accept is True
-    assert decision.matched_green == "python, бот, юкасса, оплата"
+    assert decision.matched_green == "python, бот, юкасса"
 
 
 def test_title_score_blocks_description_only_hits() -> None:
     promo = card("Продвижение по поиску клиентов", "разработка ботов")
-    assert decide_card(promo, title_repeat=False).reason == REASON_TITLE_SCORE
+    assert decide_card(promo, title_repeat=False).reason == REASON_RED
 
     photo = card("Обработать фото undetectable.ai")
     assert calculate_green_score(photo.title, "") == 0
-    assert decide_card(photo, title_repeat=False).reason == REASON_TITLE_SCORE
+    assert decide_card(photo, title_repeat=False).reason == REASON_NO_PROFILE
     assert calculate_green_score("нужен ai бот", "") == 5
 
     finished = card("Доделать ботом интеграцию")
@@ -221,13 +217,13 @@ def test_title_score_blocks_description_only_hits() -> None:
 
     amo = card("Модуль для риелторов amoCRM")
     assert calculate_green_score(amo.title, "") < 2
-    assert decide_card(amo, title_repeat=False).reason == REASON_TITLE_SCORE
+    assert decide_card(amo, title_repeat=False).reason == REASON_NO_PROFILE
 
 
 def test_cheap_price_without_green_core_is_not_gray() -> None:
     expect(card("телеграм бот", price="5000"), REASON_ACCEPT)
-    expect(card("телеграм бот", price="2500"), REASON_BUDGET)
-    expect(card("Python бот", price="2500"), REASON_BUDGET)
+    expect(card("телеграм бот", price="2500"), REASON_ACCEPT)
+    expect(card("Python бот", price="2500"), REASON_GRAY, gray=True)
     expect(card("Python бот", price="5000"), REASON_ACCEPT)
 
 

@@ -6,35 +6,24 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 from bot.config import (
-    BUDGET_DROP_RUB,
-    DEADLINE_DROP_DAYS,
     GRAY_BUDGET_RUB,
     GRAY_KEYWORDS,
     GRAY_MODULE_COUNT,
     GREEN_SCORE_THRESHOLD,
     GREEN_WEIGHTS,
-    TITLE_SCORE_MIN,
-    MODULE_DROP_BUDGET_RUB,
-    MODULE_DROP_COUNT,
     RED_KEYWORDS,
 )
 from bot.models import OrderCard
 
 GRAY_TITLE_PREFIX = "[⚠️ СЕРЫЙ] "
+LOW_SCORE_PREFIX = "[⚠️ НИЗКИЙ СКОР] "
 
 REASON_RED = "blocked_by_red_list"
-REASON_LOW_SCORE = "blocked_by_low_score"
-REASON_BUDGET = "blocked_by_budget"
-REASON_DEADLINE = "blocked_by_deadline"
-REASON_MODULES = "blocked_by_modules"
-REASON_TITLE = "blocked_by_title_repeat"
-REASON_TITLE_SCORE = "blocked_by_title_score"
 REASON_BLACKLIST = "blocked_by_blacklist"
-REASON_PARK = "parked"
+REASON_NO_PROFILE = "no_profile_match"
+REASON_LOW = "low_score"
 REASON_ACCEPT = "accept"
 REASON_GRAY = "gray"
-PARK_SCORE = 2
-JUNK_SCORE_PENALTY = 3
 
 _TOKEN_RE = re.compile(r"(?<!\w)[\w]+(?!\w)")
 _RU_ENDINGS = (
@@ -78,7 +67,6 @@ _DEADLINE_RES = (
 )
 _MODULE_RE = re.compile(r"\b(\d+)\s+(?:модул|страниц|экран)")
 _REMOTE_RE = re.compile(r"\bremote\b|(?<!\w)удален")
-_BOT_RE = re.compile(r"(?<!\w)бот|\btelegram\b|(?<!\w)телеграм")
 
 
 _TELEGRAM_FAMILY = frozenset({"telegram", "телеграм", "телеграмм", "телега", "тг"})
@@ -138,35 +126,29 @@ def red_stems() -> frozenset[str]:
     return frozenset(stems)
 
 
+def deadline_days(title: str, description: str) -> int | None:
+    return _deadline_days(_normalize(f"{title}\n{description}"))
+
+
 def decide_card(
     card: OrderCard,
     *,
-    title_repeat: bool,
+    title_repeat: bool = False,
     blacklist_patterns: tuple[str, ...] = (),
     score_penalty: int = 0,
     extra_red: tuple[str, ...] = (),
     budget_drop_rub: int | None = None,
 ) -> FilterDecision:
+    del title_repeat, score_penalty, budget_drop_rub
     blocked = username_blocked(card.username, blacklist_patterns)
     if blocked is not None:
         return FilterDecision(False, REASON_BLACKLIST, matched_red=blocked)
-
-    title_hits = _green_hits(card.title, "")
-    title_score = sum(weight for _, weight in title_hits)
-    if title_score < TITLE_SCORE_MIN:
-        return FilterDecision(
-            False,
-            REASON_TITLE_SCORE,
-            score=title_score,
-            matched_green=", ".join(term for term, _ in title_hits),
-        )
 
     text = _normalize(f"{card.title}\n{card.description}")
     hits = _green_hits(card.title, card.description)
     score = sum(weight for _, weight in hits)
     matched_green = ", ".join(term for term, _ in hits)
     matched_red = _matched_red(text, extra_red)
-    score = max(0, score - max(0, score_penalty))
 
     def decision(accept: bool, reason: str, *, gray: bool = False, red: str = "") -> FilterDecision:
         return FilterDecision(
@@ -180,29 +162,12 @@ def decide_card(
 
     if matched_red is not None:
         return decision(False, REASON_RED, red=matched_red)
+    if score <= 0:
+        return decision(False, REASON_NO_PROFILE)
     if score < GREEN_SCORE_THRESHOLD:
-        if score == PARK_SCORE:
-            return decision(False, REASON_PARK)
-        return decision(False, REASON_LOW_SCORE)
-
+        return decision(True, REASON_LOW)
     budget = parse_budget_rub(card.price)
-    floor = BUDGET_DROP_RUB if budget_drop_rub is None else budget_drop_rub
-    if budget is not None and budget < floor:
-        return decision(False, REASON_BUDGET)
-    deadline_days = _deadline_days(text)
-    if deadline_days is not None and deadline_days < DEADLINE_DROP_DAYS:
-        return decision(False, REASON_DEADLINE)
-    modules = _module_count(text)
-    if (
-        modules is not None
-        and modules > MODULE_DROP_COUNT
-        and budget is not None
-        and budget < MODULE_DROP_BUDGET_RUB
-    ):
-        return decision(False, REASON_MODULES)
-    if title_repeat:
-        return decision(False, REASON_TITLE)
-    if _is_gray(text, budget=budget, modules=modules):
+    if _is_gray(text, budget=budget, modules=_module_count(text)):
         return decision(True, REASON_GRAY, gray=True)
     return decision(True, REASON_ACCEPT)
 
@@ -258,8 +223,6 @@ def _matched_red(text: str, extra: tuple[str, ...] = ()) -> str | None:
     for term in extra + RED_KEYWORDS:
         if _weight_term_matches(text, stems, term):
             return term
-    if _has(text, "нейросеть") and _BOT_RE.search(text) is None:
-        return "нейросеть"
     if _has(text, "москва") and _REMOTE_RE.search(text) is None:
         return "москва"
     if _has(text, "санкт-петербург") and _REMOTE_RE.search(text) is None:

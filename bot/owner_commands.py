@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.database import SeenStorage
-from bot.kwork_filter import JUNK_SCORE_PENALTY, parse_budget_rub
+from bot.kwork_filter import parse_budget_rub
 from bot.models import OrderCard
 from bot.run_control import RunControl
 from bot.suggestions import apply_suggestion, decline_suggestion, refresh_suggestions, suggestion_lines
@@ -44,6 +44,7 @@ COMMANDS = {
     "/parked",
     "/parked_clear",
     "/suggestions",
+    "/rejected_stats",
 }
 
 
@@ -111,47 +112,57 @@ def suggestion_keyboard(suggestion_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def format_run_now(*, found: int, passed: int, new_sent: int, parked: int, auth_error: str) -> str:
-    if auth_error:
-        reason = "отказ авторизации" if auth_error == "auth" else auth_error
-        return f"Прогон Kwork не состоялся: {reason}."
+def format_source_run(row: dict) -> str:
+    label = "Kwork" if row["source"] == "kwork" else "Почта"
+    if row["auth_error"]:
+        reason = "отказ авторизации" if row["auth_error"] == "auth" else row["auth_error"]
+        return f"{label} {row['started_at']}\nпрогон не состоялся: {reason}."
+    reasons = row["reasons"]
     return (
-        "Прогон Kwork\n"
-        f"найдено: {found}\n"
-        f"прошло фильтр: {passed}\n"
-        f"новых: {new_sent}\n"
-        f"на парковке: {parked}"
+        f"{label} {row['started_at']}\n"
+        f"найдено: {row['found']}\n"
+        f"дошло до владельца: {row['new_sent']}\n"
+        f"отсеяно красным списком: {int(reasons.get('blocked_by_red_list', 0))}\n"
+        f"отсеяно блэклистом: {int(reasons.get('blocked_by_blacklist', 0))}\n"
+        f"без слов профиля: {int(reasons.get('no_profile_match', 0))}"
     )
 
 
-def format_run_stats(row: dict | None) -> str:
-    if row is None:
+def format_run_now(*, found: int, new_sent: int, auth_error: str, reasons: dict[str, int]) -> str:
+    if auth_error:
+        reason = "отказ авторизации" if auth_error == "auth" else auth_error
+        return f"Прогон Kwork не состоялся: {reason}."
+    text = format_source_run(
+        {
+            "source": "kwork",
+            "started_at": "",
+            "found": found,
+            "new_sent": new_sent,
+            "auth_error": "",
+            "reasons": reasons,
+        }
+    )
+    return text.replace("Kwork \n", "Прогон Kwork\n", 1)
+
+
+def format_run_stats(rows: list[dict]) -> str:
+    if not rows:
         return "Прогонов ещё не было."
-    if row["auth_error"]:
-        reason = "отказ авторизации" if row["auth_error"] == "auth" else row["auth_error"]
-        return f"Последний прогон {row['started_at']} ({row['source']}) не состоялся: {reason}."
-    reasons = {
-        str(name): int(count)
-        for name, count in row["reasons"].items()
-        if name not in {"accept", "gray"}
-    }
-    ranked = sorted(reasons.items(), key=lambda item: (-item[1], item[0]))[:3]
+    return "\n\n".join(format_source_run(row) for row in rows)
+
+
+def format_rejected_stats(report: dict) -> str:
+    counts = report["counts"]
     lines = [
-        f"Последний прогон: {row['started_at']}",
-        f"источник: {row['source']}",
-        f"найдено: {row['found']}",
-        f"прошло фильтр: {row['passed']}",
-        f"новых: {row['new_sent']}",
-        f"на парковке: {row['parked']}",
-        "Отказы:",
+        "Отсев за 30 дней",
+        f"красный список: {counts.get('blocked_by_red_list', 0)}",
+        f"блэклист: {counts.get('blocked_by_blacklist', 0)}",
+        f"нет слов профиля: {counts.get('no_profile_match', 0)}",
+        "Последние без слов профиля:",
     ]
-    if reasons:
-        lines.extend(f"{name}: {count}" for name, count in sorted(reasons.items()))
-    else:
-        lines.append("нет")
-    lines.append("Топ-3 причин:")
-    if ranked:
-        lines.extend(f"{name}: {count}" for name, count in ranked)
+    titles = report["no_profile_titles"]
+    if titles:
+        lines.extend(f"- {title}" for title in titles)
     else:
         lines.append("нет")
     return "\n".join(lines)
@@ -230,12 +241,13 @@ class OwnerCommands:
         async with self.run_control.lock:
             outcome = await self._run_kwork()
             self._record("kwork", outcome, moment)
+        metrics = outcome.metrics or {}
+        reasons = {} if outcome.auth_error else metrics.get("reasons", {})
         return format_run_now(
-            found=outcome.found,
-            passed=0 if outcome.metrics is None else int(outcome.metrics["passed_filter"]),
-            new_sent=0 if outcome.metrics is None else int(outcome.metrics["sent_notifications"]),
-            parked=0 if outcome.metrics is None else int(outcome.metrics["parked"]),
+            found=0 if outcome.auth_error else outcome.found,
+            new_sent=0 if outcome.metrics is None else int(metrics.get("sent_notifications", 0)),
             auth_error=outcome.auth_error,
+            reasons={str(key): int(value) for key, value in reasons.items()},
         )
 
     def record_kwork(self, outcome, *, now: datetime | None = None) -> None:
@@ -269,7 +281,10 @@ class OwnerCommands:
         )
 
     def run_stats(self) -> str:
-        return format_run_stats(self.storage.last_run())
+        return format_run_stats(self.storage.runs())
+
+    def rejected_stats(self, *, now: datetime | None = None) -> str:
+        return format_rejected_stats(self.storage.rejection_report(now or datetime.now(tz=UTC)))
 
     def pause(self) -> str:
         return self.run_control.pause()
@@ -377,9 +392,5 @@ class OwnerCommands:
         )
 
     def penalty_for(self, user_id: int | None, *, now: datetime) -> int:
-        if user_id is None:
-            return 0
-        since = (now.astimezone(UTC) - FEEDBACK_WINDOW).isoformat(timespec="seconds")
-        if user_id in self.storage.penalized_user_ids(since, JUNK_VOTES):
-            return JUNK_SCORE_PENALTY
+        del user_id, now
         return 0
