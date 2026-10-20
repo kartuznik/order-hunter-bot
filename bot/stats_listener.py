@@ -3,18 +3,30 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from datetime import UTC, datetime
 
 from aiogram import Bot
 
 from bot.config import Settings
 from bot.database import SeenStorage
+from bot.kwork_api import NOTICE_AUTH
+from bot.kwork_token import render_token_status
 
 logger = logging.getLogger("order_hunter.stats_listener")
 
 
+def _command_name(text: str) -> str:
+    return text.strip().split(maxsplit=1)[0].lower()
+
+
 def _is_stats_command(text: str) -> bool:
-    command = text.strip().split(maxsplit=1)[0].lower()
+    command = _command_name(text)
     return command == "/stats" or command.startswith("/stats@")
+
+
+def _is_token_status_command(text: str) -> bool:
+    command = _command_name(text)
+    return command == "/kwork_token_status" or command.startswith("/kwork_token_status@")
 
 
 def _render_stats_text(stats: dict[str, int]) -> str:
@@ -58,14 +70,23 @@ async def run_stats_listener(
                 message = upd.message
                 if message is None or not message.text:
                     continue
-                if not _is_stats_command(message.text):
+                if not (_is_stats_command(message.text) or _is_token_status_command(message.text)):
                     continue
                 chat_id = message.chat.id
                 if chat_id not in settings.notify_chat_ids:
                     with contextlib.suppress(Exception):
                         await bot.send_message(chat_id=chat_id, text="Недостаточно прав.")
                     continue
-                stats = storage.read_stats()
-                await bot.send_message(chat_id=chat_id, text=_render_stats_text(stats))
+                if _is_token_status_command(message.text):
+                    text = render_token_status(
+                        token=settings.kwork_token,
+                        updated_raw=settings.KWORK_TOKEN_UPDATED_AT,
+                        now=datetime.now(tz=UTC),
+                        warn_days=settings.KWORK_TOKEN_WARN_DAYS,
+                        auth_failed=storage.get_notice(NOTICE_AUTH) == "sent",
+                    )
+                else:
+                    text = _render_stats_text(storage.read_stats())
+                await bot.send_message(chat_id=chat_id, text=text)
     finally:
         await bot.session.close()
